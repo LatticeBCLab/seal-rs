@@ -1,0 +1,16 @@
+[package]
+name = "media-seal-rs"
+version = "0.1.0"
+edition = "2021"
+description = "A digital watermarking tool for images and media files"
+authors = ["Media Seal RS Team"]
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+image = "0.24"
+hound = "3.5"
+ndarray = "0.15"
+anyhow = "1.0"
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+rustdct = "0.7"
