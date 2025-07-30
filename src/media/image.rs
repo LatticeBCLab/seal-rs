@@ -1,6 +1,6 @@
 use crate::error::{Result, WatermarkError};
 use crate::watermark::{WatermarkAlgorithm, WatermarkUtils};
-use image::{ImageBuffer, Luma, DynamicImage, ImageFormat};
+use image::{ImageBuffer, Luma, Rgb, DynamicImage, ImageFormat, ColorType};
 use ndarray::Array2;
 use std::path::Path;
 
@@ -18,19 +18,42 @@ impl ImageWatermarker {
     ) -> Result<()> {
         // 加载图片
         let img = image::open(&input_path)?;
-        let gray_img = img.to_luma8();
-
-        // 转换为ndarray
-        let data = Self::image_to_array(&gray_img)?;
-
+        
         // 将水印文本转换为比特
         let watermark_bits = WatermarkUtils::string_to_bits(watermark_text);
 
-        // 嵌入水印
-        let watermarked_data = algorithm.embed(&data, &watermark_bits, strength)?;
-
-        // 转换回图片格式
-        let watermarked_img = Self::array_to_image(&watermarked_data)?;
+        let watermarked_img = match img.color() {
+            ColorType::L8 => {
+                // 灰度图片处理
+                let gray_img = img.to_luma8();
+                let data = Self::image_to_array_gray(&gray_img)?;
+                let watermarked_data = algorithm.embed(&data, &watermark_bits, strength)?;
+                Self::array_to_image_gray(&watermarked_data)?
+            }
+            ColorType::Rgb8 | ColorType::Rgba8 => {
+                // 彩色图片处理 - 转换为RGB并在每个通道嵌入水印
+                let rgb_img = img.to_rgb8();
+                let (r_data, g_data, b_data) = Self::image_to_array_rgb(&rgb_img)?;
+                
+                // 在三个通道分别嵌入水印
+                let watermarked_r = algorithm.embed(&r_data, &watermark_bits, strength)?;
+                let watermarked_g = algorithm.embed(&g_data, &watermark_bits, strength)?;
+                let watermarked_b = algorithm.embed(&b_data, &watermark_bits, strength)?;
+                
+                Self::array_to_image_rgb(&watermarked_r, &watermarked_g, &watermarked_b)?
+            }
+            _ => {
+                // 其他格式转换为RGB处理
+                let rgb_img = img.to_rgb8();
+                let (r_data, g_data, b_data) = Self::image_to_array_rgb(&rgb_img)?;
+                
+                let watermarked_r = algorithm.embed(&r_data, &watermark_bits, strength)?;
+                let watermarked_g = algorithm.embed(&g_data, &watermark_bits, strength)?;
+                let watermarked_b = algorithm.embed(&b_data, &watermark_bits, strength)?;
+                
+                Self::array_to_image_rgb(&watermarked_r, &watermarked_g, &watermarked_b)?
+            }
+        };
 
         // 保存图片
         watermarked_img.save(&output_path)?;
@@ -51,13 +74,27 @@ impl ImageWatermarker {
     ) -> Result<String> {
         // 加载图片
         let img = image::open(&input_path)?;
-        let gray_img = img.to_luma8();
 
-        // 转换为ndarray
-        let data = Self::image_to_array(&gray_img)?;
-
-        // 提取水印比特
-        let extracted_bits = algorithm.extract(&data, watermark_length * 8)?;
+        let extracted_bits = match img.color() {
+            ColorType::L8 => {
+                // 灰度图片处理
+                let gray_img = img.to_luma8();
+                let data = Self::image_to_array_gray(&gray_img)?;
+                algorithm.extract(&data, watermark_length * 8)?
+            }
+            ColorType::Rgb8 | ColorType::Rgba8 => {
+                // 彩色图片处理 - 从R通道提取（也可以投票）
+                let rgb_img = img.to_rgb8();
+                let (r_data, _g_data, _b_data) = Self::image_to_array_rgb(&rgb_img)?;
+                algorithm.extract(&r_data, watermark_length * 8)?
+            }
+            _ => {
+                // 其他格式转换为RGB处理
+                let rgb_img = img.to_rgb8();
+                let (r_data, _g_data, _b_data) = Self::image_to_array_rgb(&rgb_img)?;
+                algorithm.extract(&r_data, watermark_length * 8)?
+            }
+        };
 
         // 转换为字符串
         let watermark_text = WatermarkUtils::bits_to_string(&extracted_bits)?;
@@ -78,14 +115,27 @@ impl ImageWatermarker {
     ) -> Result<String> {
         // 加载图片
         let img = image::open(&input_path)?;
-        let gray_img = img.to_luma8();
 
         if verbose {
-            println!("图片信息: {}x{} 像素", img.width(), img.height());
+            println!("图片信息: {}x{} 像素, 格式: {:?}", img.width(), img.height(), img.color());
         }
 
-        // 转换为ndarray
-        let data = Self::image_to_array(&gray_img)?;
+        let data = match img.color() {
+            ColorType::L8 => {
+                let gray_img = img.to_luma8();
+                Self::image_to_array_gray(&gray_img)?
+            }
+            ColorType::Rgb8 | ColorType::Rgba8 => {
+                let rgb_img = img.to_rgb8();
+                let (r_data, _g_data, _b_data) = Self::image_to_array_rgb(&rgb_img)?;
+                r_data
+            }
+            _ => {
+                let rgb_img = img.to_rgb8();
+                let (r_data, _g_data, _b_data) = Self::image_to_array_rgb(&rgb_img)?;
+                r_data
+            }
+        };
 
         if verbose {
             println!("尝试提取 {} 字符的水印 ({} 比特)...", watermark_length, watermark_length * 8);
@@ -145,8 +195,8 @@ impl ImageWatermarker {
         }
     }
 
-    /// 将图片转换为ndarray
-    fn image_to_array(img: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Result<Array2<f64>> {
+    /// 将灰度图片转换为ndarray
+    fn image_to_array_gray(img: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Result<Array2<f64>> {
         let (width, height) = img.dimensions();
         let mut array = Array2::<f64>::zeros((height as usize, width as usize));
 
@@ -157,8 +207,8 @@ impl ImageWatermarker {
         Ok(array)
     }
 
-    /// 将ndarray转换为图片
-    fn array_to_image(array: &Array2<f64>) -> Result<DynamicImage> {
+    /// 将ndarray转换为灰度图片
+    fn array_to_image_gray(array: &Array2<f64>) -> Result<DynamicImage> {
         let (height, width) = array.dim();
         let mut img_buffer = ImageBuffer::new(width as u32, height as u32);
 
@@ -170,6 +220,43 @@ impl ImageWatermarker {
         }
 
         Ok(DynamicImage::ImageLuma8(img_buffer))
+    }
+
+    /// 将RGB图片转换为三个通道的ndarray
+    fn image_to_array_rgb(img: &ImageBuffer<Rgb<u8>, Vec<u8>>) -> Result<(Array2<f64>, Array2<f64>, Array2<f64>)> {
+        let (width, height) = img.dimensions();
+        let mut r_array = Array2::<f64>::zeros((height as usize, width as usize));
+        let mut g_array = Array2::<f64>::zeros((height as usize, width as usize));
+        let mut b_array = Array2::<f64>::zeros((height as usize, width as usize));
+
+        for (x, y, pixel) in img.enumerate_pixels() {
+            r_array[[y as usize, x as usize]] = pixel[0] as f64;
+            g_array[[y as usize, x as usize]] = pixel[1] as f64;
+            b_array[[y as usize, x as usize]] = pixel[2] as f64;
+        }
+
+        Ok((r_array, g_array, b_array))
+    }
+
+    /// 将三个通道的ndarray转换为RGB图片
+    fn array_to_image_rgb(r_array: &Array2<f64>, g_array: &Array2<f64>, b_array: &Array2<f64>) -> Result<DynamicImage> {
+        let (height, width) = r_array.dim();
+        let mut img_buffer = ImageBuffer::new(width as u32, height as u32);
+
+        for (x, y, pixel) in img_buffer.enumerate_pixels_mut() {
+            let r_value = r_array[[y as usize, x as usize]];
+            let g_value = g_array[[y as usize, x as usize]];
+            let b_value = b_array[[y as usize, x as usize]];
+            
+            // 限制像素值在0-255范围内
+            let clamped_r = r_value.max(0.0).min(255.0) as u8;
+            let clamped_g = g_value.max(0.0).min(255.0) as u8;
+            let clamped_b = b_value.max(0.0).min(255.0) as u8;
+            
+            *pixel = Rgb([clamped_r, clamped_g, clamped_b]);
+        }
+
+        Ok(DynamicImage::ImageRgb8(img_buffer))
     }
 
     /// 获取图片尺寸信息
