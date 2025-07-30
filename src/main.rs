@@ -1,8 +1,14 @@
 use clap::Parser;
-use media_seal_rs::prelude::*;
+use seal::prelude::*;
 use std::process;
 
 fn main() -> Result<()> {
+    // 确保 FFmpeg 可用
+    if let Err(e) = ffmpeg_sidecar::download::auto_download() {
+        eprintln!("警告: 无法下载 FFmpeg: {}", e);
+        eprintln!("请确保系统中已安装 FFmpeg，或者检查网络连接");
+    }
+
     let cli = Cli::parse();
 
     if let Err(e) = run(cli) {
@@ -83,9 +89,26 @@ fn run(cli: Cli) -> Result<()> {
                     )?;
                 }
                 MediaType::Video => {
-                    return Err(WatermarkError::UnsupportedFormat(
-                        "视频水印功能暂未实现".to_string(),
-                    ));
+                    if cli.verbose {
+                        println!("处理视频文件: {:?}", input);
+                        
+                        // 检查水印容量
+                        if !VideoWatermarker::check_watermark_capacity(
+                            input,
+                            watermark,
+                            watermark_algorithm.as_ref(),
+                        )? {
+                            println!("警告: 水印可能太长，可能影响嵌入效果");
+                        }
+                    }
+
+                    VideoWatermarker::embed_watermark(
+                        input,
+                        output,
+                        watermark,
+                        watermark_algorithm.as_ref(),
+                        *strength,
+                    )?;
                 }
             }
 
@@ -139,9 +162,11 @@ fn run(cli: Cli) -> Result<()> {
                     )?
                 }
                 MediaType::Video => {
-                    return Err(WatermarkError::UnsupportedFormat(
-                        "视频水印功能暂未实现".to_string(),
-                    ));
+                    VideoWatermarker::extract_watermark(
+                        input,
+                        watermark_algorithm.as_ref(),
+                        watermark_length,
+                    )?
                 }
             };
 

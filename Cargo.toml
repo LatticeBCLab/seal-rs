@@ -1,5 +1,5 @@
 [package]
-name = "media-seal-rs"
+name = "seal"
 version = "0.1.0"
 edition = "2021"
 description = "A digital watermarking tool for images and media files"
@@ -14,3 +14,4 @@ anyhow = "1.0"
 thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 rustdct = "0.7"
+ffmpeg-sidecar = { version = "2.0", features = ["download_ffmpeg"] }

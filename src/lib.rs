@@ -49,6 +49,6 @@ pub mod prelude {
             DctWatermark
     };
     pub use crate::media::{
-        ImageWatermarker, AudioWatermarker, MediaUtils, MediaType
+        ImageWatermarker, AudioWatermarker, VideoWatermarker, MediaUtils, MediaType
     };
 } 

@@ -26,6 +26,9 @@ pub enum WatermarkError {
 
     #[error("参数错误: {0}")]
     InvalidArgument(String),
+
+    #[error("处理错误: {0}")]
+    ProcessingError(String),
 }
 
 pub type Result<T> = std::result::Result<T, WatermarkError>; 

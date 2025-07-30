@@ -1,8 +1,10 @@
 pub mod image;
 pub mod audio;
+pub mod video;
 
 pub use image::ImageWatermarker;
 pub use audio::AudioWatermarker;
+pub use video::VideoWatermarker;
 
 use crate::error::{Result, WatermarkError};
 use std::path::Path;
