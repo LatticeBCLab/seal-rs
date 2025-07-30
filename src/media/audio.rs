@@ -8,7 +8,18 @@ use std::path::Path;
 pub struct AudioWatermarker;
 
 impl AudioWatermarker {
-    /// 嵌入水印到音频中
+    /// # 嵌入水印到音频中
+    /// 
+    /// # 参数
+    /// * `input_path` - 输入音频文件路径
+    /// * `output_path` - 输出音频文件路径
+    /// * `watermark_text` - 水印文本
+    /// * `algorithm` - 水印算法
+    /// * `strength` - 水印强度
+    /// 
+    /// # 返回
+    /// * `Ok(())` - 成功嵌入水印
+    /// * `Err(WatermarkError)` - 嵌入水印失败
     pub fn embed_watermark<P: AsRef<Path>>(
         input_path: P,
         output_path: P,
@@ -16,7 +27,6 @@ impl AudioWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
     ) -> Result<()> {
-        // 读取音频文件
         let mut reader = WavReader::open(&input_path)?;
         let spec = reader.spec();
 
@@ -37,11 +47,35 @@ impl AudioWatermarker {
                     .collect()
             }
             SampleFormat::Int => {
-                reader.samples::<i32>()
-                    .collect::<std::result::Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .map(|s| s as f64 / i32::MAX as f64)
-                    .collect()
+                // 根据位深度选择正确的整数类型
+                match spec.bits_per_sample {
+                    16 => {
+                        reader.samples::<i16>()
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|s| s as f64 / i16::MAX as f64)
+                            .collect()
+                    }
+                    24 | 32 => {
+                        reader.samples::<i32>()
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|s| {
+                                if spec.bits_per_sample == 24 {
+                                    let max_24bit = (1 << 23) - 1;
+                                    s as f64 / max_24bit as f64
+                                } else {
+                                    s as f64 / i32::MAX as f64
+                                }
+                            })
+                            .collect()
+                    }
+                    _ => {
+                        return Err(WatermarkError::UnsupportedFormat(
+                            format!("不支持的位深度: {} bits", spec.bits_per_sample)
+                        ));
+                    }
+                }
             }
         };
 
@@ -68,7 +102,16 @@ impl AudioWatermarker {
         Ok(())
     }
 
-    /// 从音频中提取水印
+    /// # 从音频中提取水印
+    /// 
+    /// # 参数
+    /// * `input_path` - 输入音频文件路径
+    /// * `algorithm` - 水印算法
+    /// * `watermark_length` - 期望的水印长度
+    /// 
+    /// # 返回
+    /// * `Ok(String)` - 提取的水印文本
+    /// * `Err(WatermarkError)` - 提取水印失败
     pub fn extract_watermark<P: AsRef<Path>>(
         input_path: P,
         algorithm: &dyn WatermarkAlgorithm,
@@ -94,11 +137,35 @@ impl AudioWatermarker {
                     .collect()
             }
             SampleFormat::Int => {
-                reader.samples::<i32>()
-                    .collect::<std::result::Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .map(|s| s as f64 / i32::MAX as f64)
-                    .collect()
+                // 根据位深度选择正确的整数类型
+                match spec.bits_per_sample {
+                    16 => {
+                        reader.samples::<i16>()
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|s| s as f64 / i16::MAX as f64)
+                            .collect()
+                    }
+                    24 | 32 => {
+                        reader.samples::<i32>()
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|s| {
+                                if spec.bits_per_sample == 24 {
+                                    let max_24bit = (1 << 23) - 1;
+                                    s as f64 / max_24bit as f64
+                                } else {
+                                    s as f64 / i32::MAX as f64
+                                }
+                            })
+                            .collect()
+                    }
+                    _ => {
+                        return Err(WatermarkError::UnsupportedFormat(
+                            format!("不支持的位深度: {} bits", spec.bits_per_sample)
+                        ));
+                    }
+                }
             }
         };
 
@@ -173,9 +240,33 @@ impl AudioWatermarker {
                 }
             }
             SampleFormat::Int => {
-                for &sample in samples.iter() {
-                    let int_sample = (sample * i32::MAX as f64) as i32;
-                    writer.write_sample(int_sample)?;
+                // 根据实际位数进行转换
+                match spec.bits_per_sample {
+                    16 => {
+                        for &sample in samples.iter() {
+                            let int_sample = (sample * i16::MAX as f64) as i16;
+                            writer.write_sample(int_sample)?;
+                        }
+                    }
+                    24 => {
+                        for &sample in samples.iter() {
+                            // 24位音频处理
+                            let max_24bit = (1 << 23) - 1; // 2^23 - 1
+                            let int_sample = (sample * max_24bit as f64) as i32;
+                            writer.write_sample(int_sample)?;
+                        }
+                    }
+                    32 => {
+                        for &sample in samples.iter() {
+                            let int_sample = (sample * i32::MAX as f64) as i32;
+                            writer.write_sample(int_sample)?;
+                        }
+                    }
+                    _ => {
+                        return Err(WatermarkError::UnsupportedFormat(
+                            format!("不支持的位深度: {} bits", spec.bits_per_sample)
+                        ));
+                    }
                 }
             }
         }
@@ -207,7 +298,15 @@ impl AudioWatermarker {
                 reader.samples::<f32>().count()
             }
             SampleFormat::Int => {
-                reader.samples::<i32>().count()
+                match spec.bits_per_sample {
+                    16 => reader.samples::<i16>().count(),
+                    24 | 32 => reader.samples::<i32>().count(),
+                    _ => {
+                        return Err(WatermarkError::UnsupportedFormat(
+                            format!("不支持的位深度: {} bits", spec.bits_per_sample)
+                        ));
+                    }
+                }
             }
         };
 
@@ -256,11 +355,35 @@ impl AudioWatermarker {
                     .collect()
             }
             SampleFormat::Int => {
-                reader.samples::<i32>()
-                    .collect::<std::result::Result<Vec<_>, _>>()?
-                    .into_iter()
-                    .map(|s| s as f64 / i32::MAX as f64)
-                    .collect()
+                // 根据位深度选择正确的整数类型
+                match spec.bits_per_sample {
+                    16 => {
+                        reader.samples::<i16>()
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|s| s as f64 / i16::MAX as f64)
+                            .collect()
+                    }
+                    24 | 32 => {
+                        reader.samples::<i32>()
+                            .collect::<std::result::Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .map(|s| {
+                                if spec.bits_per_sample == 24 {
+                                    let max_24bit = (1 << 23) - 1;
+                                    s as f64 / max_24bit as f64
+                                } else {
+                                    s as f64 / i32::MAX as f64
+                                }
+                            })
+                            .collect()
+                    }
+                    _ => {
+                        return Err(WatermarkError::UnsupportedFormat(
+                            format!("不支持的位深度: {} bits", spec.bits_per_sample)
+                        ));
+                    }
+                }
             }
         };
 

@@ -8,6 +8,7 @@ use crate::error::{Result, WatermarkError};
 use std::path::Path;
 
 /// 媒体文件类型检测
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaType {
     Image,
     Audio,
