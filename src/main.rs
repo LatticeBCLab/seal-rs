@@ -2,13 +2,14 @@ use clap::Parser;
 use media_seal_rs::prelude::*;
 use std::process;
 
-fn main() {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     if let Err(e) = run(cli) {
         eprintln!("错误: {}", e);
         process::exit(1);
     }
+    Ok(())
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -20,7 +21,6 @@ fn run(cli: Cli) -> Result<()> {
             algorithm,
             strength,
         } => {
-            // 检查输入文件是否存在
             if !MediaUtils::file_exists(input) {
                 return Err(WatermarkError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -28,14 +28,13 @@ fn run(cli: Cli) -> Result<()> {
                 )));
             }
 
-            // 确保输出目录存在
             MediaUtils::ensure_output_dir(output)?;
 
             // 检测媒体类型
             let media_type = MediaUtils::detect_media_type(input)?;
 
             // 创建水印算法
-            let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone())?;
+            let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone());
 
             // 根据媒体类型选择处理方式
             match media_type {
@@ -98,6 +97,7 @@ fn run(cli: Cli) -> Result<()> {
         Commands::Extract {
             input,
             algorithm,
+            length,
             output,
         } => {
             // 检查输入文件是否存在
@@ -112,29 +112,23 @@ fn run(cli: Cli) -> Result<()> {
             let media_type = MediaUtils::detect_media_type(input)?;
 
             // 创建水印算法
-            let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone())?;
+            let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone());
 
             if cli.verbose {
                 println!("从文件提取水印: {:?}", input);
                 println!("使用算法: {:?}", algorithm);
             }
 
-            // 提示用户输入期望的水印长度
-            println!("请输入期望的水印文本长度（字符数）:");
-            let mut input_length = String::new();
-            std::io::stdin().read_line(&mut input_length)
-                .map_err(|e| WatermarkError::Io(e))?;
-            
-            let watermark_length: usize = input_length.trim().parse()
-                .map_err(|_| WatermarkError::InvalidArgument("无效的长度".to_string()))?;
+            let watermark_length = *length;
 
             // 根据媒体类型选择处理方式
             let extracted_watermark = match media_type {
                 MediaType::Image => {
-                    ImageWatermarker::extract_watermark(
+                    ImageWatermarker::extract_watermark_debug(
                         input,
                         watermark_algorithm.as_ref(),
                         watermark_length,
+                        cli.verbose,
                     )?
                 }
                 MediaType::Audio => {

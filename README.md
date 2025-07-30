@@ -95,9 +95,12 @@ media-seal-rs extract -i audio_watermarked.wav -a dwt -o extracted_watermark.txt
 
 ### DWT (离散小波变换)
 
-- **优点**: 多分辨率分析，局部化特性好
+- **优点**: 多分辨率分析，局部化特性好，高性能实现
 - **适用**: 需要保持图片质量的场景
-- **要求**: 图片尺寸需要是2的幂
+- **特性**:
+  - 使用`omni-wave`库，支持多种小波类型
+  - 支持任意尺寸图像（自动填充到偶数尺寸）
+  - 支持Biorthogonal小波族
 
 ## 支持格式
 
@@ -119,7 +122,7 @@ media-seal-rs extract -i audio_watermarked.wav -a dwt -o extracted_watermark.txt
    - 强度过低可能导致水印提取困难
    - 强度过高可能影响媒体质量
    - 建议范围: 0.05-0.2
-3. **格式兼容**: DCT算法现已支持任意尺寸图像，DWT要求图像尺寸为2的幂
+3. **格式兼容**: DCT和DWT算法现已支持任意尺寸图像（自动填充处理）
 4. **质量保持**: 嵌入水印会轻微影响原始媒体质量
 
 ## 开发
@@ -195,10 +198,12 @@ cargo bench
 
 ## 更新日志
 
-### v0.1.1 - DCT算法优化
+### v0.1.2 - 算法全面优化
 - ✅ 使用`rustdct`库替换自实现的DCT算法
+- ✅ 使用`omni-wave`库替换自实现的DWT算法
 - ✅ 支持任意尺寸图像（自动填充处理）
-- ✅ 显著提升DCT算法性能
+- ✅ 显著提升两种算法性能
+- ✅ 支持多种小波类型（Biorthogonal族）
 - ✅ 改进错误提示信息
 
 ## TODO

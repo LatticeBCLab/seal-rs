@@ -47,6 +47,10 @@ pub enum Commands {
         #[arg(short, long, default_value = "dct")]
         algorithm: Algorithm,
 
+        /// 期望的水印文本长度（字符数）
+        #[arg(short, long)]
+        length: usize,
+
         /// 输出水印到文件（可选）
         #[arg(short, long)]
         output: Option<PathBuf>,
@@ -58,6 +62,4 @@ pub enum Commands {
 pub enum Algorithm {
     /// 离散余弦变换
     Dct,
-    /// 离散小波变换
-    Dwt,
 } 

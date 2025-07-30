@@ -212,15 +212,16 @@ impl AudioWatermarker {
         };
 
         let matrix_size = (total_samples as f64).sqrt().ceil() as usize;
-        let matrix_size = matrix_size.next_power_of_two();
 
         let capacity = match algorithm.name() {
-            "DCT" => {
-                let blocks = (matrix_size / 8) * (matrix_size / 8);
+            name if name.contains("DCT") => {
+                let adjusted_size = ((matrix_size + 7) / 8) * 8;
+                let blocks = (adjusted_size / 8) * (adjusted_size / 8);
                 blocks
             }
-            "DWT" => {
-                let coeffs = matrix_size * matrix_size / 4;
+            name if name.contains("DWT") => {
+                let adjusted_size = if matrix_size % 2 == 0 { matrix_size } else { matrix_size + 1 };
+                let coeffs = adjusted_size * adjusted_size / 4;
                 coeffs
             }
             _ => return Err(WatermarkError::Algorithm("未知算法".to_string())),
@@ -267,8 +268,8 @@ impl AudioWatermarker {
         let len = samples.len();
         let matrix_size = (len as f64).sqrt().ceil() as usize;
         let required_size = match algorithm.name() {
-            "DCT" => ((matrix_size + 7) / 8) * 8, // 8的倍数
-            "DWT" => matrix_size.next_power_of_two(), // 2的幂
+            name if name.contains("DCT") => ((matrix_size + 7) / 8) * 8, // 8的倍数
+            name if name.contains("DWT") => if matrix_size % 2 == 0 { matrix_size } else { matrix_size + 1 }, // 偶数
             _ => return Err(WatermarkError::Algorithm("未知算法".to_string())),
         };
 

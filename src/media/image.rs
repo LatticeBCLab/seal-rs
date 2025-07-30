@@ -69,6 +69,82 @@ impl ImageWatermarker {
         Ok(watermark_text)
     }
 
+    /// 从图片中提取水印（调试模式）
+    pub fn extract_watermark_debug<P: AsRef<Path>>(
+        input_path: P,
+        algorithm: &dyn WatermarkAlgorithm,
+        watermark_length: usize,
+        verbose: bool,
+    ) -> Result<String> {
+        // 加载图片
+        let img = image::open(&input_path)?;
+        let gray_img = img.to_luma8();
+
+        if verbose {
+            println!("图片信息: {}x{} 像素", img.width(), img.height());
+        }
+
+        // 转换为ndarray
+        let data = Self::image_to_array(&gray_img)?;
+
+        if verbose {
+            println!("尝试提取 {} 字符的水印 ({} 比特)...", watermark_length, watermark_length * 8);
+        }
+
+        // 首先尝试标准提取
+        match algorithm.extract(&data, watermark_length * 8) {
+            Ok(extracted_bits) => {
+                if verbose {
+                    println!("{}", WatermarkUtils::analyze_extracted_bits(&extracted_bits));
+                }
+
+                // 尝试严格转换
+                match WatermarkUtils::bits_to_string(&extracted_bits) {
+                    Ok(watermark_text) => {
+                        println!("水印提取完成:");
+                        println!("使用算法: {}", algorithm.name());
+                        println!("提取到的水印: {}", watermark_text);
+                        return Ok(watermark_text);
+                    }
+                    Err(_) => {
+                        if verbose {
+                            println!("严格UTF-8转换失败，尝试宽松模式...");
+                        }
+                        
+                        let lossy_text = WatermarkUtils::bits_to_string_lossy(&extracted_bits);
+                        println!("水印提取完成 (宽松模式):");
+                        println!("使用算法: {}", algorithm.name());
+                        println!("提取到的水印: {}", lossy_text);
+                        return Ok(lossy_text);
+                    }
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    println!("标准提取失败: {}", e);
+                    println!("尝试投票提取方法...");
+                }
+
+                // 尝试投票提取
+                match WatermarkUtils::extract_with_voting(algorithm, &data, watermark_length * 8, 3) {
+                    Ok(voted_bits) => {
+                        if verbose {
+                            println!("投票提取结果:");
+                            println!("{}", WatermarkUtils::analyze_extracted_bits(&voted_bits));
+                        }
+
+                        let lossy_text = WatermarkUtils::bits_to_string_lossy(&voted_bits);
+                        println!("水印提取完成 (投票模式):");
+                        println!("使用算法: {}", algorithm.name());
+                        println!("提取到的水印: {}", lossy_text);
+                        return Ok(lossy_text);
+                    }
+                    Err(_) => return Err(e),
+                }
+            }
+        }
+    }
+
     /// 将图片转换为ndarray
     fn image_to_array(img: &ImageBuffer<Luma<u8>, Vec<u8>>) -> Result<Array2<f64>> {
         let (width, height) = img.dimensions();
@@ -122,10 +198,10 @@ impl ImageWatermarker {
                 let blocks_h = (height + 7) / 8;
                 (blocks_w * blocks_h) as usize
             }
-            "DWT" => {
-                // DWT算法基于小波系数
-                let padded_width = width.next_power_of_two();
-                let padded_height = height.next_power_of_two();
+            name if name.contains("DWT") => {
+                // DWT算法基于小波系数，支持偶数尺寸
+                let padded_width = if width % 2 == 0 { width } else { width + 1 };
+                let padded_height = if height % 2 == 0 { height } else { height + 1 };
                 let coeffs = (padded_width * padded_height) / 4;
                 coeffs as usize
             }

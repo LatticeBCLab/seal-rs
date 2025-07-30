@@ -45,8 +45,8 @@ pub mod prelude {
     pub use crate::error::{Result, WatermarkError};
     pub use crate::cli::{Algorithm, Cli, Commands};
     pub use crate::watermark::{
-        WatermarkAlgorithm, WatermarkUtils, WatermarkFactory,
-        DctWatermark, DwtWatermark
+                    WatermarkAlgorithm, WatermarkUtils, WatermarkFactory,
+            DctWatermark
     };
     pub use crate::media::{
         ImageWatermarker, AudioWatermarker, MediaUtils, MediaType
