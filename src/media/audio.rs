@@ -1,5 +1,6 @@
 use crate::error::{Result, WatermarkError};
 use crate::watermark::{WatermarkAlgorithm, WatermarkUtils};
+use ffmpeg_sidecar::command::FfmpegCommand;
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use ndarray::Array2;
 use std::path::Path;
@@ -27,58 +28,35 @@ impl AudioWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
     ) -> Result<()> {
-        let mut reader = WavReader::open(&input_path)?;
-        let spec = reader.spec();
+        let input_path = input_path.as_ref();
+        let output_path = output_path.as_ref();
 
-        // 检查音频格式
-        if spec.channels != 1 {
-            return Err(WatermarkError::UnsupportedFormat(
-                "目前只支持单声道音频".to_string(),
-            ));
-        }
+        // 创建临时目录
+        let temp_dir = std::env::temp_dir().join(format!("audio_watermark_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir)?;
+
+        // 使用ffmpeg转换为统一格式（16bit 44.1kHz 单声道 WAV）
+        let normalized_audio = temp_dir.join("normalized.wav");
+        Self::normalize_audio_format(input_path, &normalized_audio)?;
+
+        // 读取标准化后的音频
+        let mut reader = WavReader::open(&normalized_audio)?;
+        let spec = reader.spec();
+        let original_sample_count = reader.duration();
 
         // 读取音频样本
-        let samples: Vec<f64> = match spec.sample_format {
-            SampleFormat::Float => reader
-                .samples::<f32>()
-                .collect::<std::result::Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|s| s as f64)
-                .collect(),
-            SampleFormat::Int => {
-                // 根据位深度选择正确的整数类型
-                match spec.bits_per_sample {
-                    16 => reader
-                        .samples::<i16>()
-                        .collect::<std::result::Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .map(|s| s as f64 / i16::MAX as f64)
-                        .collect(),
-                    24 | 32 => reader
-                        .samples::<i32>()
-                        .collect::<std::result::Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .map(|s| {
-                            if spec.bits_per_sample == 24 {
-                                let max_24bit = (1 << 23) - 1;
-                                s as f64 / max_24bit as f64
-                            } else {
-                                s as f64 / i32::MAX as f64
-                            }
-                        })
-                        .collect(),
-                    _ => {
-                        return Err(WatermarkError::UnsupportedFormat(format!(
-                            "不支持的位深度: {} bits",
-                            spec.bits_per_sample
-                        )));
-                    }
-                }
-            }
-        };
+        let samples: Vec<f64> = reader
+            .samples::<i16>()
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|s| s as f64 / i16::MAX as f64)
+            .collect();
 
+        // 确保样本数量符合算法要求，但保持原始长度信息
+        let processed_samples = Self::prepare_samples_for_watermarking(&samples, algorithm)?;
+        
         // 将音频转换为二维数组进行处理
-        let data = Self::audio_to_array(&samples)?;
+        let data = Self::audio_to_array(&processed_samples)?;
 
         // 将水印文本转换为比特
         let watermark_bits = WatermarkUtils::string_to_bits(watermark_text);
@@ -86,16 +64,101 @@ impl AudioWatermarker {
         // 嵌入水印
         let watermarked_data = algorithm.embed(&data, &watermark_bits, strength)?;
 
-        // 转换回音频格式
-        let watermarked_samples = Self::array_to_audio(&watermarked_data)?;
+        // 转换回音频格式，保持原始长度
+        let mut watermarked_samples = Self::array_to_audio(&watermarked_data)?;
+        
+        // 截断到原始样本数量，避免时长变化
+        if watermarked_samples.len() > original_sample_count as usize {
+            watermarked_samples.truncate(original_sample_count as usize);
+        }
 
-        // 写入音频文件
-        Self::write_wav(&output_path, &watermarked_samples, spec)?;
+        // 创建临时水印音频文件
+        let watermarked_temp = temp_dir.join("watermarked.wav");
+        Self::write_wav(&watermarked_temp, &watermarked_samples, spec)?;
 
-        println!("水印已成功嵌入到音频中: {:?}", output_path.as_ref());
+        // 使用ffmpeg转换回原始格式
+        Self::convert_to_original_format(&watermarked_temp, &input_path.to_path_buf(), &output_path.to_path_buf())?;
+
+        // 清理临时文件
+        std::fs::remove_dir_all(&temp_dir)?;
+
+        println!("水印已成功嵌入到音频中: {:?}", output_path);
         println!("使用算法: {}", algorithm.name());
-        println!("水印内容: {}", watermark_text);
-        println!("嵌入强度: {}", strength);
+        println!("水印内容: {watermark_text}");
+        println!("嵌入强度: {strength}");
+
+        Ok(())
+    }
+
+    /// 将音频标准化为统一格式
+    fn normalize_audio_format<P: AsRef<Path>>(input_path: P, output_path: P) -> Result<()> {
+        let mut command = FfmpegCommand::new();
+        command
+            .input(input_path.as_ref().to_str().unwrap())
+            .args(["-ac", "1"]) // 转换为单声道
+            .args(["-ar", "44100"]) // 采样率44.1kHz
+            .args(["-acodec", "pcm_s16le"]) // 16位PCM
+            .args(["-y"]) // 覆盖输出文件
+            .output(output_path.as_ref().to_str().unwrap());
+
+        let mut child = command.spawn().map_err(WatermarkError::Io)?;
+        let status = child.wait().map_err(WatermarkError::Io)?;
+
+        if !status.success() {
+            return Err(WatermarkError::ProcessingError("音频格式标准化失败".to_string()));
+        }
+
+        Ok(())
+    }
+
+    /// 准备样本以适应水印算法
+    fn prepare_samples_for_watermarking(samples: &[f64], algorithm: &dyn WatermarkAlgorithm) -> Result<Vec<f64>> {
+        let len = samples.len();
+        let matrix_size = (len as f64).sqrt().ceil() as usize;
+        
+        let required_size = match algorithm.name() {
+            name if name.contains("DCT") => {
+                let adjusted_size = matrix_size.div_ceil(8) * 8;
+                adjusted_size * adjusted_size
+            },
+            name if name.contains("DWT") => {
+                let adjusted_size = matrix_size.next_power_of_two();
+                adjusted_size * adjusted_size
+            },
+            _ => return Err(WatermarkError::Algorithm("未知算法".to_string())),
+        };
+
+        let mut prepared_samples = samples.to_vec();
+        
+        if prepared_samples.len() < required_size {
+            // 使用零填充而不是重复填充，避免引入噪声
+            prepared_samples.resize(required_size, 0.0);
+        } else if prepared_samples.len() > required_size {
+            prepared_samples.truncate(required_size);
+        }
+
+        Ok(prepared_samples)
+    }
+
+    /// 转换回原始格式
+    fn convert_to_original_format<P: AsRef<Path>>(
+        watermarked_path: P, 
+        _original_path: P, 
+        output_path: P
+    ) -> Result<()> {
+        // 直接复制水印音频，保持WAV格式
+        let mut command = FfmpegCommand::new();
+        command
+            .input(watermarked_path.as_ref().to_str().unwrap())
+            .args(["-y"])
+            .output(output_path.as_ref().to_str().unwrap());
+
+        let mut child = command.spawn().map_err(WatermarkError::Io)?;
+        let status = child.wait().map_err(WatermarkError::Io)?;
+
+        if !status.success() {
+            return Err(WatermarkError::ProcessingError("音频格式转换失败".to_string()));
+        }
 
         Ok(())
     }
@@ -115,58 +178,33 @@ impl AudioWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         watermark_length: usize,
     ) -> Result<String> {
-        // 读取音频文件
-        let mut reader = WavReader::open(&input_path)?;
-        let spec = reader.spec();
+        let input_path = input_path.as_ref();
 
-        if spec.channels != 1 {
-            return Err(WatermarkError::UnsupportedFormat(
-                "目前只支持单声道音频".to_string(),
-            ));
-        }
+        // 创建临时目录
+        let temp_dir = std::env::temp_dir().join(format!("audio_extract_{}", std::process::id()));
+        std::fs::create_dir_all(&temp_dir)?;
+
+        // 使用ffmpeg标准化音频格式
+        let normalized_audio = temp_dir.join("normalized.wav");
+        Self::normalize_audio_format(input_path, &normalized_audio)?;
+
+        // 读取标准化后的音频文件
+        let mut reader = WavReader::open(&normalized_audio)?;
+        let _spec = reader.spec();
 
         // 读取音频样本
-        let samples: Vec<f64> = match spec.sample_format {
-            SampleFormat::Float => reader
-                .samples::<f32>()
-                .collect::<std::result::Result<Vec<_>, _>>()?
-                .into_iter()
-                .map(|s| s as f64)
-                .collect(),
-            SampleFormat::Int => {
-                // 根据位深度选择正确的整数类型
-                match spec.bits_per_sample {
-                    16 => reader
-                        .samples::<i16>()
-                        .collect::<std::result::Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .map(|s| s as f64 / i16::MAX as f64)
-                        .collect(),
-                    24 | 32 => reader
-                        .samples::<i32>()
-                        .collect::<std::result::Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .map(|s| {
-                            if spec.bits_per_sample == 24 {
-                                let max_24bit = (1 << 23) - 1;
-                                s as f64 / max_24bit as f64
-                            } else {
-                                s as f64 / i32::MAX as f64
-                            }
-                        })
-                        .collect(),
-                    _ => {
-                        return Err(WatermarkError::UnsupportedFormat(format!(
-                            "不支持的位深度: {} bits",
-                            spec.bits_per_sample
-                        )));
-                    }
-                }
-            }
-        };
+        let samples: Vec<f64> = reader
+            .samples::<i16>()
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|s| s as f64 / i16::MAX as f64)
+            .collect();
+
+        // 准备样本以适应算法
+        let processed_samples = Self::prepare_samples_for_watermarking(&samples, algorithm)?;
 
         // 转换为ndarray
-        let data = Self::audio_to_array(&samples)?;
+        let data = Self::audio_to_array(&processed_samples)?;
 
         // 提取水印比特
         let extracted_bits = algorithm.extract(&data, watermark_length * 8)?;
@@ -174,9 +212,12 @@ impl AudioWatermarker {
         // 转换为字符串
         let watermark_text = WatermarkUtils::bits_to_string(&extracted_bits)?;
 
+        // 清理临时文件
+        std::fs::remove_dir_all(&temp_dir)?;
+
         println!("水印提取完成:");
         println!("使用算法: {}", algorithm.name());
-        println!("提取到的水印: {}", watermark_text);
+        println!("提取到的水印: {watermark_text}");
 
         Ok(watermark_text)
     }

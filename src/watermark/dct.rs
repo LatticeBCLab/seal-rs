@@ -268,8 +268,7 @@ impl WatermarkAlgorithm for DctWatermark {
 
         if expected_length > total_blocks {
             return Err(WatermarkError::InvalidArgument(format!(
-                "期望长度{}超过了可提取的块数{}",
-                expected_length, total_blocks
+                "期望长度{expected_length}超过了可提取的块数{total_blocks}"
             )));
         }
 

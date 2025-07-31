@@ -1,5 +1,6 @@
 use crate::error::{Result, WatermarkError};
 use crate::watermark::{WatermarkAlgorithm, WatermarkUtils};
+use colored::*;
 use image::{ColorType, DynamicImage, ImageBuffer, ImageFormat, Luma, Rgb};
 use ndarray::Array2;
 use std::path::Path;
@@ -15,6 +16,18 @@ impl ImageWatermarker {
         watermark_text: &str,
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
+    ) -> Result<()> {
+        Self::embed_watermark_with_options(input_path, output_path, watermark_text, algorithm, strength, false)
+    }
+
+    /// 嵌入水印到图片（带选项控制）
+    pub fn embed_watermark_with_options<P: AsRef<Path>>(
+        input_path: P,
+        output_path: P,
+        watermark_text: &str,
+        algorithm: &dyn WatermarkAlgorithm,
+        strength: f64,
+        silent: bool,
     ) -> Result<()> {
         // 加载图片
         let img = image::open(&input_path)?;
@@ -58,10 +71,13 @@ impl ImageWatermarker {
         // 保存图片
         watermarked_img.save(&output_path)?;
 
-        println!("水印已成功嵌入到图片中: {:?}", output_path.as_ref());
-        println!("使用算法: {}", algorithm.name());
-        println!("水印内容: {}", watermark_text);
-        println!("嵌入强度: {}", strength);
+        // 根据 silent 参数决定是否输出日志
+        if !silent {
+            println!("{} {}", "🖼️".green(), format!("水印已成功嵌入到图片中: {:?}", output_path.as_ref()).green());
+            println!("使用算法: {}", algorithm.name());
+            println!("水印内容: {watermark_text}");
+            println!("嵌入强度: {strength}");
+        }
 
         Ok(())
     }
@@ -101,7 +117,7 @@ impl ImageWatermarker {
 
         println!("水印提取完成:");
         println!("使用算法: {}", algorithm.name());
-        println!("提取到的水印: {}", watermark_text);
+        println!("提取到的水印: {watermark_text}");
 
         Ok(watermark_text)
     }
@@ -165,7 +181,7 @@ impl ImageWatermarker {
                     Ok(watermark_text) => {
                         println!("水印提取完成:");
                         println!("使用算法: {}", algorithm.name());
-                        println!("提取到的水印: {}", watermark_text);
+                        println!("提取到的水印: {watermark_text}");
                         Ok(watermark_text)
                     }
                     Err(_) => {
@@ -176,14 +192,14 @@ impl ImageWatermarker {
                         let lossy_text = WatermarkUtils::bits_to_string_lossy(&extracted_bits);
                         println!("水印提取完成 (宽松模式):");
                         println!("使用算法: {}", algorithm.name());
-                        println!("提取到的水印: {}", lossy_text);
+                        println!("提取到的水印: {lossy_text}");
                         Ok(lossy_text)
                     }
                 }
             }
             Err(e) => {
                 if verbose {
-                    println!("标准提取失败: {}", e);
+                    println!("标准提取失败: {e}");
                     println!("尝试投票提取方法...");
                 }
 
@@ -199,7 +215,7 @@ impl ImageWatermarker {
                         let lossy_text = WatermarkUtils::bits_to_string_lossy(&voted_bits);
                         println!("水印提取完成 (投票模式):");
                         println!("使用算法: {}", algorithm.name());
-                        println!("提取到的水印: {}", lossy_text);
+                        println!("提取到的水印: {lossy_text}");
                         Ok(lossy_text)
                     }
                     Err(_) => Err(e),

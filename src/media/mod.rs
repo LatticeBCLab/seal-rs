@@ -35,8 +35,7 @@ impl MediaUtils {
             "wav" | "wave" => Ok(MediaType::Audio),
             "mp4" | "avi" | "mov" | "mkv" => Ok(MediaType::Video),
             _ => Err(WatermarkError::UnsupportedFormat(format!(
-                "不支持的文件格式: {}",
-                extension
+                "不支持的文件格式: {extension}"
             ))),
         }
     }

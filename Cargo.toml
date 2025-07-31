@@ -15,3 +15,5 @@ thiserror = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 rustdct = "0.7"
 ffmpeg-sidecar = { version = "2.0", features = ["download_ffmpeg"] }
+colored = "2.0"
+indicatif = "0.17"

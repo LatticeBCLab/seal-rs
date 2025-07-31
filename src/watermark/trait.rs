@@ -117,7 +117,7 @@ impl WatermarkUtils {
                         byte |= 1 << (7 - i);
                     }
                 }
-                analysis.push_str(&format!("{}, ", byte));
+                analysis.push_str(&format!("{byte}, "));
             }
             analysis.push_str("]\n");
 
@@ -134,7 +134,7 @@ impl WatermarkUtils {
             }
 
             match String::from_utf8(bytes.clone()) {
-                Ok(string) => analysis.push_str(&format!("- UTF-8解码: '{}'\n", string)),
+                Ok(string) => analysis.push_str(&format!("- UTF-8解码: '{string}'\n")),
                 Err(_) => analysis.push_str(&format!(
                     "- UTF-8解码失败，使用lossy: '{}'\n",
                     String::from_utf8_lossy(&bytes)

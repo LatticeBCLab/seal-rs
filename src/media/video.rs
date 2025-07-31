@@ -1,6 +1,8 @@
 use crate::error::{Result, WatermarkError};
 use crate::watermark::WatermarkAlgorithm;
+use colored::*;
 use ffmpeg_sidecar::command::FfmpegCommand;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 
 /// 视频水印处理器
@@ -19,35 +21,71 @@ impl VideoWatermarker {
         let input_path = input_path.as_ref();
         let output_path = output_path.as_ref();
 
+        // 创建总进度条
+        let progress = ProgressBar::new(5);
+        progress.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+
         // 创建临时目录用于处理视频帧
+        progress.set_message("🗂️  创建临时目录".to_string());
         let temp_dir = std::env::temp_dir().join(format!("video_watermark_{}", std::process::id()));
         std::fs::create_dir_all(&temp_dir)?;
+        progress.inc(1);
 
         // 使用ffmpeg提取视频信息
+        progress.set_message("📊  分析视频信息".to_string());
         let video_info = Self::get_video_info(input_path)?;
 
         // 提取音频轨道（如果存在）
         let audio_path = temp_dir.join("audio.aac");
         if video_info.has_audio {
+            progress.set_message("🎵  提取音频轨道".to_string());
             Self::extract_audio(input_path, &audio_path)?;
         }
+        progress.inc(1);
 
         // 提取视频帧
+        progress.set_message("🎬  提取视频帧".to_string());
         let frames_dir = temp_dir.join("frames");
         std::fs::create_dir_all(&frames_dir)?;
         Self::extract_frames(input_path, &frames_dir)?;
+        progress.inc(1);
 
         // 处理每一帧，添加水印
+        progress.set_message("🎯  处理视频帧 (添加水印)".to_string());
         let frame_files = Self::get_frame_files(&frames_dir)?;
+        
+        // 创建帧处理进度条
+        let frame_progress = ProgressBar::new(frame_files.len() as u64);
+        frame_progress.set_style(
+            ProgressStyle::default_bar()
+                .template("   {spinner:.green} [{elapsed_precise}] [{bar:30.yellow/red}] {pos}/{len} 帧")
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+
         for frame_file in &frame_files {
             Self::process_frame(frame_file, watermark_text, algorithm, strength)?;
+            frame_progress.inc(1);
         }
+        frame_progress.finish_with_message(format!("✅ 已处理 {} 帧", frame_files.len()).green().to_string());
+        progress.inc(1);
 
         // 重新组合视频
+        progress.set_message("🎞️  重新组合视频".to_string());
         Self::reassemble_video(&frames_dir, &audio_path, output_path, &video_info, lossless)?;
+        progress.inc(1);
 
+        // 完成并清理
+        progress.finish_with_message("🎉 视频水印嵌入完成!".green().bold().to_string());
+        
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
+        println!("{} {}", "🧹".blue(), "临时文件已清理".blue());
 
         Ok(())
     }
@@ -60,18 +98,36 @@ impl VideoWatermarker {
     ) -> Result<String> {
         let input_path = input_path.as_ref();
 
+        // 创建提取进度条
+        let progress = ProgressBar::new(3);
+        progress.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+
         // 创建临时目录
+        progress.set_message("🗂️  创建临时目录".to_string());
         let temp_dir = std::env::temp_dir().join(format!("video_extract_{}", std::process::id()));
         std::fs::create_dir_all(&temp_dir)?;
+        progress.inc(1);
 
-        // 提取几帧进行水印提取（使用第10帧作为样本）
+        // 提取样本帧进行水印提取
+        progress.set_message("🎬  提取样本帧".to_string());
         let sample_frame = temp_dir.join("sample_frame.png");
         Self::extract_single_frame(input_path, &sample_frame, 1)?;
+        progress.inc(1);
 
         // 使用图片水印提取算法
+        progress.set_message("🔍  分析水印数据".to_string());
         use crate::media::ImageWatermarker;
         let watermark =
             ImageWatermarker::extract_watermark(&sample_frame, algorithm, watermark_length)?;
+        progress.inc(1);
+
+        // 完成提取
+        progress.finish_with_message("🎉 视频水印提取完成!".green().bold().to_string());
 
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
@@ -209,7 +265,7 @@ impl VideoWatermarker {
     ) -> Result<()> {
         let mut child = FfmpegCommand::new()
             .input(input_path.as_ref().to_str().unwrap())
-            .args(["-vf", &format!("select=eq(n\\,{})", frame_number)])
+            .args(["-vf", &format!("select=eq(n\\,{frame_number})")])
             .args(["-vframes", "1"])
             .args(["-y"])
             .output(output_path.as_ref().to_str().unwrap())
@@ -253,13 +309,14 @@ impl VideoWatermarker {
         // 创建临时文件
         let temp_output = frame_path.as_ref().with_extension("tmp.png");
 
-        // 使用图片水印算法处理帧
-        ImageWatermarker::embed_watermark(
+        // 使用静默模式的图片水印算法处理帧（不打印日志）
+        ImageWatermarker::embed_watermark_with_options(
             frame_path.as_ref(),
             &temp_output,
             watermark_text,
             algorithm,
             strength,
+            true, // silent = true，不打印日志
         )?;
 
         // 替换原文件
