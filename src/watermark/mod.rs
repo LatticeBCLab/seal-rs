@@ -1,8 +1,8 @@
-pub mod r#trait;
 pub mod dct;
+pub mod r#trait;
 
-pub use r#trait::{WatermarkAlgorithm, WatermarkUtils};
 pub use dct::DctWatermark;
+pub use r#trait::{WatermarkAlgorithm, WatermarkUtils};
 
 use crate::cli::Algorithm;
 use std::sync::Arc;
@@ -17,4 +17,4 @@ impl WatermarkFactory {
             Algorithm::Dct => Arc::new(DctWatermark::new()),
         }
     }
-} 
+}

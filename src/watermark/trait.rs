@@ -4,34 +4,25 @@ use ndarray::Array2;
 /// 水印算法的通用接口
 pub trait WatermarkAlgorithm {
     /// 嵌入水印到数据中
-    /// 
+    ///
     /// # 参数
     /// * `data` - 原始数据矩阵
     /// * `watermark` - 水印数据
     /// * `strength` - 水印强度 (0.0-1.0)
-    /// 
+    ///
     /// # 返回
     /// 包含水印的数据矩阵
-    fn embed(
-        &self,
-        data: &Array2<f64>,
-        watermark: &[u8],
-        strength: f64,
-    ) -> Result<Array2<f64>>;
+    fn embed(&self, data: &Array2<f64>, watermark: &[u8], strength: f64) -> Result<Array2<f64>>;
 
     /// 从数据中提取水印
-    /// 
+    ///
     /// # 参数
     /// * `data` - 包含水印的数据矩阵
     /// * `expected_length` - 期望的水印长度
-    /// 
+    ///
     /// # 返回
     /// 提取的水印数据
-    fn extract(
-        &self,
-        data: &Array2<f64>,
-        expected_length: usize,
-    ) -> Result<Vec<u8>>;
+    fn extract(&self, data: &Array2<f64>, expected_length: usize) -> Result<Vec<u8>>;
 
     /// 获取算法名称
     fn name(&self) -> &'static str;
@@ -69,8 +60,7 @@ impl WatermarkUtils {
             bytes.push(byte);
         }
 
-        String::from_utf8(bytes)
-            .map_err(|_| crate::error::WatermarkError::InvalidWatermark)
+        String::from_utf8(bytes).map_err(|_| crate::error::WatermarkError::InvalidWatermark)
     }
 
     /// 将二进制数据转换为字符串（宽松模式，用于调试）
@@ -95,17 +85,27 @@ impl WatermarkUtils {
 
     /// 分析提取的比特数据，提供调试信息
     pub fn analyze_extracted_bits(bits: &[u8]) -> String {
-        let mut analysis = format!("比特数据分析:\n");
+        let mut analysis = "比特数据分析:\n".to_string();
         analysis.push_str(&format!("- 总长度: {} 比特\n", bits.len()));
-        analysis.push_str(&format!("- 字节数: {} ({}完整)\n", 
-                                  bits.len() / 8, 
-                                  if bits.len() % 8 == 0 { "" } else { "不" }));
-        
+        analysis.push_str(&format!(
+            "- 字节数: {} ({}完整)\n",
+            bits.len() / 8,
+            if bits.len() % 8 == 0 { "" } else { "不" }
+        ));
+
         // 统计0和1的分布
         let ones = bits.iter().filter(|&&bit| bit == 1).count();
         let zeros = bits.len() - ones;
-        analysis.push_str(&format!("- 1的数量: {} ({:.1}%)\n", ones, ones as f32 * 100.0 / bits.len() as f32));
-        analysis.push_str(&format!("- 0的数量: {} ({:.1}%)\n", zeros, zeros as f32 * 100.0 / bits.len() as f32));
+        analysis.push_str(&format!(
+            "- 1的数量: {} ({:.1}%)\n",
+            ones,
+            ones as f32 * 100.0 / bits.len() as f32
+        ));
+        analysis.push_str(&format!(
+            "- 0的数量: {} ({:.1}%)\n",
+            zeros,
+            zeros as f32 * 100.0 / bits.len() as f32
+        ));
 
         // 尝试转换为字节并显示
         if bits.len() % 8 == 0 {
@@ -132,11 +132,13 @@ impl WatermarkUtils {
                 }
                 bytes.push(byte);
             }
-            
+
             match String::from_utf8(bytes.clone()) {
                 Ok(string) => analysis.push_str(&format!("- UTF-8解码: '{}'\n", string)),
-                Err(_) => analysis.push_str(&format!("- UTF-8解码失败，使用lossy: '{}'\n", 
-                                                   String::from_utf8_lossy(&bytes))),
+                Err(_) => analysis.push_str(&format!(
+                    "- UTF-8解码失败，使用lossy: '{}'\n",
+                    String::from_utf8_lossy(&bytes)
+                )),
             }
         }
 
@@ -155,7 +157,7 @@ impl WatermarkUtils {
         }
 
         let mut vote_counts = vec![0i32; expected_length];
-        
+
         // 进行多次提取
         for _ in 0..vote_rounds {
             match algorithm.extract(data, expected_length) {
@@ -182,4 +184,4 @@ impl WatermarkUtils {
 
         Ok(final_bits)
     }
-} 
+}

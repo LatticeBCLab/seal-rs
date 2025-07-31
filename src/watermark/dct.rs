@@ -1,6 +1,6 @@
 use crate::error::{Result, WatermarkError};
 use crate::watermark::r#trait::WatermarkAlgorithm;
-use ndarray::{Array2, s};
+use ndarray::{s, Array2};
 use rustdct::DctPlanner;
 
 /// DCT水印算法实现 - 使用rustdct库
@@ -29,15 +29,15 @@ impl DctWatermark {
     /// 将图像填充到块大小的倍数
     fn pad_to_block_size(&self, data: &Array2<f64>) -> Array2<f64> {
         let (height, width) = data.dim();
-        let new_height = ((height + self.block_size - 1) / self.block_size) * self.block_size;
-        let new_width = ((width + self.block_size - 1) / self.block_size) * self.block_size;
+        let new_height = height.div_ceil(self.block_size) * self.block_size;
+        let new_width = width.div_ceil(self.block_size) * self.block_size;
 
         if new_height == height && new_width == width {
             return data.clone();
         }
 
         let mut padded = Array2::<f64>::zeros((new_height, new_width));
-        
+
         // 复制原始数据
         padded.slice_mut(s![0..height, 0..width]).assign(data);
 
@@ -66,8 +66,15 @@ impl DctWatermark {
     }
 
     /// 从填充的图像中提取原始尺寸
-    fn unpad_from_block_size(&self, padded: &Array2<f64>, original_height: usize, original_width: usize) -> Array2<f64> {
-        padded.slice(s![0..original_height, 0..original_width]).to_owned()
+    fn unpad_from_block_size(
+        &self,
+        padded: &Array2<f64>,
+        original_height: usize,
+        original_width: usize,
+    ) -> Array2<f64> {
+        padded
+            .slice(s![0..original_height, 0..original_width])
+            .to_owned()
     }
 
     /// 执行2D DCT变换
@@ -135,10 +142,26 @@ impl DctWatermark {
     fn get_mid_frequency_positions(&self) -> Vec<(usize, usize)> {
         // 选择中频系数位置，避免低频（视觉重要）和高频（容易被压缩丢失）
         vec![
-            (2, 1), (1, 2), (3, 1), (2, 2), (1, 3),
-            (4, 1), (3, 2), (2, 3), (1, 4), (5, 1),
-            (4, 2), (3, 3), (2, 4), (1, 5), (6, 1),
-            (5, 2), (4, 3), (3, 4), (2, 5), (1, 6),
+            (2, 1),
+            (1, 2),
+            (3, 1),
+            (2, 2),
+            (1, 3),
+            (4, 1),
+            (3, 2),
+            (2, 3),
+            (1, 4),
+            (5, 1),
+            (4, 2),
+            (3, 3),
+            (2, 4),
+            (1, 5),
+            (6, 1),
+            (5, 2),
+            (4, 3),
+            (3, 4),
+            (2, 5),
+            (1, 6),
         ]
     }
 }
@@ -150,12 +173,7 @@ impl Default for DctWatermark {
 }
 
 impl WatermarkAlgorithm for DctWatermark {
-    fn embed(
-        &self,
-        data: &Array2<f64>,
-        watermark: &[u8],
-        strength: f64,
-    ) -> Result<Array2<f64>> {
+    fn embed(&self, data: &Array2<f64>, watermark: &[u8], strength: f64) -> Result<Array2<f64>> {
         let original_height = data.nrows();
         let original_width = data.ncols();
 
@@ -169,10 +187,11 @@ impl WatermarkAlgorithm for DctWatermark {
         let total_blocks = blocks_h * blocks_w;
 
         if watermark.len() > total_blocks {
-            return Err(WatermarkError::InvalidArgument(
-                format!("水印数据太长，超过了可嵌入的块数。最大可嵌入{}比特，实际需要{}比特", 
-                       total_blocks, watermark.len())
-            ));
+            return Err(WatermarkError::InvalidArgument(format!(
+                "水印数据太长，超过了可嵌入的块数。最大可嵌入{}比特，实际需要{}比特",
+                total_blocks,
+                watermark.len()
+            )));
         }
 
         let positions = self.get_mid_frequency_positions();
@@ -191,7 +210,9 @@ impl WatermarkAlgorithm for DctWatermark {
                 let end_y = start_y + self.block_size;
                 let end_x = start_x + self.block_size;
 
-                let block = padded_data.slice(s![start_y..end_y, start_x..end_x]).to_owned();
+                let block = padded_data
+                    .slice(s![start_y..end_y, start_x..end_x])
+                    .to_owned();
 
                 // 执行DCT
                 let mut dct_block = dct_algorithm.dct_2d(&block);
@@ -206,7 +227,7 @@ impl WatermarkAlgorithm for DctWatermark {
                     let coeff = dct_block[[u, v]];
                     let min_strength = 10.0; // 最小强度值，确保系数有足够的幅度
                     let magnitude = coeff.abs().max(min_strength);
-                    
+
                     if bit == 1 {
                         // bit=1时，强制系数为正数
                         dct_block[[u, v]] = magnitude + strength * magnitude;
@@ -220,7 +241,8 @@ impl WatermarkAlgorithm for DctWatermark {
                 let watermarked_block = dct_algorithm.idct_2d(&dct_block);
 
                 // 将修改后的块写回结果
-                result.slice_mut(s![start_y..end_y, start_x..end_x])
+                result
+                    .slice_mut(s![start_y..end_y, start_x..end_x])
                     .assign(&watermarked_block);
 
                 watermark_idx += 1;
@@ -235,11 +257,7 @@ impl WatermarkAlgorithm for DctWatermark {
         Ok(final_result)
     }
 
-    fn extract(
-        &self,
-        data: &Array2<f64>,
-        expected_length: usize,
-    ) -> Result<Vec<u8>> {
+    fn extract(&self, data: &Array2<f64>, expected_length: usize) -> Result<Vec<u8>> {
         // 填充到块大小的倍数
         let padded_data = self.pad_to_block_size(data);
         let (height, width) = padded_data.dim();
@@ -249,9 +267,10 @@ impl WatermarkAlgorithm for DctWatermark {
         let total_blocks = blocks_h * blocks_w;
 
         if expected_length > total_blocks {
-            return Err(WatermarkError::InvalidArgument(
-                format!("期望长度{}超过了可提取的块数{}", expected_length, total_blocks)
-            ));
+            return Err(WatermarkError::InvalidArgument(format!(
+                "期望长度{}超过了可提取的块数{}",
+                expected_length, total_blocks
+            )));
         }
 
         let positions = self.get_mid_frequency_positions();
@@ -270,7 +289,9 @@ impl WatermarkAlgorithm for DctWatermark {
                 let end_y = start_y + self.block_size;
                 let end_x = start_x + self.block_size;
 
-                let block = padded_data.slice(s![start_y..end_y, start_x..end_x]).to_owned();
+                let block = padded_data
+                    .slice(s![start_y..end_y, start_x..end_x])
+                    .to_owned();
 
                 // 执行DCT
                 let dct_block = dct_algorithm.dct_2d(&block);
@@ -297,4 +318,4 @@ impl WatermarkAlgorithm for DctWatermark {
     fn name(&self) -> &'static str {
         "DCT (rustdct)"
     }
-} 
+}

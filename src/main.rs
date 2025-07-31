@@ -48,7 +48,7 @@ fn run(cli: Cli) -> Result<()> {
                 MediaType::Image => {
                     if cli.verbose {
                         println!("处理图片文件: {:?}", input);
-                        
+
                         // 检查水印容量
                         if !ImageWatermarker::check_watermark_capacity(
                             input,
@@ -70,7 +70,7 @@ fn run(cli: Cli) -> Result<()> {
                 MediaType::Audio => {
                     if cli.verbose {
                         println!("处理音频文件: {:?}", input);
-                        
+
                         // 检查水印容量
                         if !AudioWatermarker::check_watermark_capacity(
                             input,
@@ -92,7 +92,7 @@ fn run(cli: Cli) -> Result<()> {
                 MediaType::Video => {
                     if cli.verbose {
                         println!("处理视频文件: {:?}", input);
-                        
+
                         // 检查水印容量
                         if !VideoWatermarker::check_watermark_capacity(
                             input,
@@ -148,28 +148,21 @@ fn run(cli: Cli) -> Result<()> {
 
             // 根据媒体类型选择处理方式
             let extracted_watermark = match media_type {
-                MediaType::Image => {
-                    ImageWatermarker::extract_watermark_debug(
-                        input,
-                        watermark_algorithm.as_ref(),
-                        watermark_length,
-                        cli.verbose,
-                    )?
-                }
-                MediaType::Audio => {
-                    AudioWatermarker::extract_watermark(
-                        input,
-                        watermark_algorithm.as_ref(),
-                        watermark_length,
-                    )?
-                }
-                MediaType::Video => {
-                    VideoWatermarker::extract_watermark(
-                        input,
-                        watermark_algorithm.as_ref(),
-                        watermark_length,
-                    )?
-                }
+                MediaType::Image => ImageWatermarker::extract_watermark(
+                    input,
+                    watermark_algorithm.as_ref(),
+                    watermark_length,
+                )?,
+                MediaType::Audio => AudioWatermarker::extract_watermark(
+                    input,
+                    watermark_algorithm.as_ref(),
+                    watermark_length,
+                )?,
+                MediaType::Video => VideoWatermarker::extract_watermark(
+                    input,
+                    watermark_algorithm.as_ref(),
+                    watermark_length,
+                )?,
             };
 
             // 输出到文件（如果指定）

@@ -31,4 +31,4 @@ pub enum WatermarkError {
     ProcessingError(String),
 }
 
-pub type Result<T> = std::result::Result<T, WatermarkError>; 
+pub type Result<T> = std::result::Result<T, WatermarkError>;

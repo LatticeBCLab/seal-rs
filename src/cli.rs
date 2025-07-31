@@ -38,7 +38,7 @@ pub enum Commands {
         strength: f64,
 
         /// 是否使用无损压缩（仅对视频有效）
-        #[arg(long, default_value = "true")]
+        #[arg(long)]
         lossless: bool,
     },
     /// 提取水印
@@ -66,4 +66,4 @@ pub enum Commands {
 pub enum Algorithm {
     /// 离散余弦变换
     Dct,
-} 
+}
