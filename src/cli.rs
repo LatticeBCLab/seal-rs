@@ -36,6 +36,10 @@ pub enum Commands {
         /// 水印强度 (0.0-1.0)
         #[arg(short, long, default_value = "0.1")]
         strength: f64,
+
+        /// 是否使用无损压缩（仅对视频有效）
+        #[arg(long, default_value = "true")]
+        lossless: bool,
     },
     /// 提取水印
     Extract {

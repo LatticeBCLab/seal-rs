@@ -26,6 +26,7 @@ fn run(cli: Cli) -> Result<()> {
             watermark,
             algorithm,
             strength,
+            lossless,
         } => {
             if !MediaUtils::file_exists(input) {
                 return Err(WatermarkError::Io(std::io::Error::new(
@@ -108,6 +109,7 @@ fn run(cli: Cli) -> Result<()> {
                         watermark,
                         watermark_algorithm.as_ref(),
                         *strength,
+                        *lossless,
                     )?;
                 }
             }

@@ -14,7 +14,9 @@ impl VideoWatermarker {
         watermark_text: &str,
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
+        lossless: bool,
     ) -> Result<()> {
+        println!("lossless: {}", lossless);
         let input_path = input_path.as_ref();
         let output_path = output_path.as_ref();
 
@@ -48,6 +50,7 @@ impl VideoWatermarker {
             &audio_path,
             output_path.as_ref(),
             &video_info,
+            lossless,
         )?;
 
         // 清理临时文件
@@ -287,6 +290,7 @@ impl VideoWatermarker {
         audio_path: &std::path::PathBuf,
         output_path: &Path,
         video_info: &VideoInfo,
+        lossless: bool,
     ) -> Result<()> {
         let frame_pattern = frames_dir.join("frame_%06d.png");
         
@@ -297,12 +301,23 @@ impl VideoWatermarker {
         // 如果有音频，添加音频输入
         if video_info.has_audio && audio_path.exists() {
             command.input(audio_path.to_str().unwrap());
-            command.args(&["-c:v", "libx264", "-crf", "0", "-c:a", "copy"]);
+            if lossless {
+                command.args(&["-c:v", "libx264", "-crf", "0", "-c:a", "copy"]);
+                command.args(&["-preset", "ultrafast"]); // 无损压缩时，使用ultrafast可以极大加快速度
+            } else {
+                command.args(&["-c:v", "libx264", "-crf", "23", "-c:a", "copy"]);
+                command.args(&["-preset", "medium"]); // 有损压缩时，使用medium预设平衡质量和速度
+            }
         } else {
-            command.args(&["-c:v", "libx264", "-crf", "0"]);
+            if lossless {
+                command.args(&["-c:v", "libx264", "-crf", "0"]);
+                command.args(&["-preset", "ultrafast"]); // 无损压缩时，使用ultrafast可以极大加快速度
+            } else {
+                command.args(&["-c:v", "libx264", "-crf", "23"]);
+                command.args(&["-preset", "medium"]); // 有损压缩时，使用medium预设平衡质量和速度
+            }
         }
 
-        command.args(&["-preset", "ultrafast"]); // 无损压缩时，使用ultrafast可以极大加快速度
         command.args(&["-pix_fmt", "yuv420p"]);
         command.args(&["-y"]);
         command.output(output_path.to_str().unwrap());
