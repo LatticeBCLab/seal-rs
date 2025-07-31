@@ -297,11 +297,12 @@ impl VideoWatermarker {
         // 如果有音频，添加音频输入
         if video_info.has_audio && audio_path.exists() {
             command.input(audio_path.to_str().unwrap());
-            command.args(&["-c:v", "libx264", "-c:a", "copy"]);
+            command.args(&["-c:v", "libx264", "-crf", "0", "-c:a", "copy"]);
         } else {
-            command.args(&["-c:v", "libx264"]);
+            command.args(&["-c:v", "libx264", "-crf", "0"]);
         }
 
+        command.args(&["-preset", "ultrafast"]); // 无损压缩时，使用ultrafast可以极大加快速度
         command.args(&["-pix_fmt", "yuv420p"]);
         command.args(&["-y"]);
         command.output(output_path.to_str().unwrap());

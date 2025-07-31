@@ -127,8 +127,8 @@ impl DctWatermark {
             }
         }
 
-        // DCT-III需要除以2N来得到正确的逆变换
-        result.mapv(|x| x / (2.0 * cols as f64))
+        // DCT-III已经是正确缩放的逆变换，不需要额外除法
+        result
     }
 
     /// 获取中频DCT系数的位置（适合嵌入水印）
@@ -202,12 +202,17 @@ impl WatermarkAlgorithm for DctWatermark {
                 let (u, v) = positions[pos_idx];
 
                 if u < self.block_size && v < self.block_size {
-                    // 根据水印比特修改DCT系数
+                    // 使用符号嵌入法：确保系数符号与水印比特对应
                     let coeff = dct_block[[u, v]];
+                    let min_strength = 10.0; // 最小强度值，确保系数有足够的幅度
+                    let magnitude = coeff.abs().max(min_strength);
+                    
                     if bit == 1 {
-                        dct_block[[u, v]] = coeff + strength * coeff.abs().max(10.0);
+                        // bit=1时，强制系数为正数
+                        dct_block[[u, v]] = magnitude + strength * magnitude;
                     } else {
-                        dct_block[[u, v]] = coeff - strength * coeff.abs().max(10.0);
+                        // bit=0时，强制系数为负数
+                        dct_block[[u, v]] = -(magnitude + strength * magnitude);
                     }
                 }
 
