@@ -189,7 +189,7 @@ impl DctWatermark {
         }
 
         let mean_coeff = coeffs.iter().sum::<f64>() / coeffs.len() as f64;
-        (mean_coeff * base_strength * 0.1).max(1.0).min(5.0)
+        (mean_coeff * base_strength * 0.1).clamp(1.0, 5.0)
     }
 }
 
@@ -364,5 +364,210 @@ impl WatermarkAlgorithm for DctWatermark {
 
     fn name(&self) -> &'static str {
         "DCT"
+    }
+}
+
+impl DctWatermark {
+    /// 专为音频优化的温和水印嵌入方法
+    pub fn embed_audio_optimized(
+        &self,
+        data: &Array2<f64>,
+        watermark: &[u8],
+        strength: f64,
+    ) -> Result<Array2<f64>> {
+        let original_height = data.nrows();
+        let original_width = data.ncols();
+
+        // 填充到块大小的倍数
+        let padded_data = self.pad_to_block_size(data);
+        let (height, width) = padded_data.dim();
+        let mut result = padded_data.clone();
+
+        let blocks_h = height / self.block_size;
+        let blocks_w = width / self.block_size;
+        let total_blocks = blocks_h * blocks_w;
+
+        if watermark.len() > total_blocks {
+            return Err(WatermarkError::InvalidArgument(format!(
+                "水印数据太长，超过了可嵌入的块数。最大可嵌入{}比特，实际需要{}比特",
+                total_blocks,
+                watermark.len()
+            )));
+        }
+
+        // 使用与标准DCT完全相同的位置，确保兼容性
+        let audio_positions = self.get_mid_frequency_positions();
+        let mut watermark_idx = 0;
+        let mut dct_algorithm = DctWatermark::new();
+
+        println!(
+            "🎵 使用音频优化的DCT水印嵌入，块数: {}, 水印长度: {}",
+            total_blocks,
+            watermark.len()
+        );
+
+        for block_y in 0..blocks_h {
+            for block_x in 0..blocks_w {
+                if watermark_idx >= watermark.len() {
+                    break;
+                }
+
+                // 提取当前块
+                let start_y = block_y * self.block_size;
+                let start_x = block_x * self.block_size;
+                let end_y = start_y + self.block_size;
+                let end_x = start_x + self.block_size;
+
+                let block = padded_data
+                    .slice(s![start_y..end_y, start_x..end_x])
+                    .to_owned();
+
+                // 执行DCT
+                let mut dct_block = dct_algorithm.dct_2d(&block);
+
+                // 使用音频友好的温和嵌入
+                let bit = watermark[watermark_idx];
+                let pos_idx = watermark_idx % audio_positions.len();
+                let (u, v) = audio_positions[pos_idx];
+
+                if u < self.block_size && v < self.block_size {
+                    self.embed_audio_friendly_bit(&mut dct_block, u, v, bit, strength);
+                }
+
+                // 执行逆DCT
+                let watermarked_block = dct_algorithm.idct_2d(&dct_block);
+
+                // 将修改后的块写回结果
+                result
+                    .slice_mut(s![start_y..end_y, start_x..end_x])
+                    .assign(&watermarked_block);
+
+                watermark_idx += 1;
+            }
+            if watermark_idx >= watermark.len() {
+                break;
+            }
+        }
+
+        // 移除填充，返回原始尺寸
+        let final_result = self.unpad_from_block_size(&result, original_height, original_width);
+        Ok(final_result)
+    }
+
+    /// 专为音频优化的温和水印提取方法
+    pub fn extract_audio_optimized(
+        &self,
+        data: &Array2<f64>,
+        expected_length: usize,
+    ) -> Result<Vec<u8>> {
+        // 填充到块大小的倍数
+        let padded_data = self.pad_to_block_size(data);
+        let (height, width) = padded_data.dim();
+
+        let blocks_h = height / self.block_size;
+        let blocks_w = width / self.block_size;
+        let total_blocks = blocks_h * blocks_w;
+
+        if expected_length > total_blocks {
+            return Err(WatermarkError::InvalidArgument(format!(
+                "期望长度{expected_length}超过了可提取的块数{total_blocks}"
+            )));
+        }
+
+        let audio_positions = self.get_mid_frequency_positions();
+        let mut extracted_bits = Vec::new();
+        let mut dct_algorithm = DctWatermark::new();
+
+        println!("🎵 使用音频优化的DCT水印提取");
+
+        for block_y in 0..blocks_h {
+            for block_x in 0..blocks_w {
+                if extracted_bits.len() >= expected_length {
+                    break;
+                }
+
+                // 提取当前块
+                let start_y = block_y * self.block_size;
+                let start_x = block_x * self.block_size;
+                let end_y = start_y + self.block_size;
+                let end_x = start_x + self.block_size;
+
+                let block = padded_data
+                    .slice(s![start_y..end_y, start_x..end_x])
+                    .to_owned();
+
+                // 执行DCT
+                let dct_block = dct_algorithm.dct_2d(&block);
+
+                // 提取水印比特
+                let pos_idx = extracted_bits.len() % audio_positions.len();
+                let (u, v) = audio_positions[pos_idx];
+
+                if u < self.block_size && v < self.block_size {
+                    // 使用更稳健的提取逻辑
+                    let bit = self.extract_audio_friendly_bit(&dct_block, u, v);
+                    extracted_bits.push(bit);
+                }
+            }
+            if extracted_bits.len() >= expected_length {
+                break;
+            }
+        }
+
+        extracted_bits.truncate(expected_length);
+        Ok(extracted_bits)
+    }
+
+    /// 音频友好的温和比特嵌入
+    fn embed_audio_friendly_bit(
+        &self,
+        dct_block: &mut Array2<f64>,
+        u: usize,
+        v: usize,
+        bit: u8,
+        strength: f64,
+    ) {
+        let coeff = dct_block[[u, v]];
+        let magnitude = coeff.abs();
+
+        // 音频专用的温和修改策略 - 确保与标准DCT兼容
+        let audio_strength = strength * 1.0; // 使用完整强度，但采用温和的修改方式
+        let min_threshold = 1.0; // 最小阈值
+
+        // 计算目标变化量
+        let base_change = audio_strength * magnitude.max(min_threshold);
+
+        if bit == 1 {
+            // 目标：确保系数为正，使用类似标准DCT但更温和的方式
+            if coeff >= 0.0 {
+                // 已经是正数，温和增加
+                dct_block[[u, v]] = coeff + base_change * 0.3; // 30%的变化
+            } else {
+                // 是负数，需要变正，模拟标准DCT但更温和
+                dct_block[[u, v]] = magnitude + base_change * 0.3;
+            }
+        } else {
+            // 目标：确保系数为负
+            if coeff <= 0.0 {
+                // 已经是负数，温和减少
+                dct_block[[u, v]] = coeff - base_change * 0.3; // 30%的变化
+            } else {
+                // 是正数，需要变负，模拟标准DCT但更温和
+                dct_block[[u, v]] = -(magnitude + base_change * 0.3);
+            }
+        }
+    }
+
+    /// 音频友好的稳健比特提取
+    fn extract_audio_friendly_bit(&self, dct_block: &Array2<f64>, u: usize, v: usize) -> u8 {
+        let coeff = dct_block[[u, v]];
+
+        // 使用简单的符号判断，与嵌入逻辑一致
+        // 由于嵌入时修改很温和，提取时也要相应放宽
+        if coeff >= 0.0 {
+            1
+        } else {
+            0
+        }
     }
 }

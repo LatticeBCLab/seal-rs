@@ -1,4 +1,5 @@
 use crate::error::{Result, WatermarkError};
+use crate::watermark::dct::DctWatermark;
 use crate::watermark::{WatermarkAlgorithm, WatermarkUtils};
 use ffmpeg_sidecar::command::FfmpegCommand;
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
@@ -42,7 +43,6 @@ impl AudioWatermarker {
         // 读取标准化后的音频
         let mut reader = WavReader::open(&normalized_audio)?;
         let spec = reader.spec();
-        let original_sample_count = reader.duration();
 
         // 读取音频样本
         let samples: Vec<f64> = reader
@@ -52,25 +52,18 @@ impl AudioWatermarker {
             .map(|s| s as f64 / i16::MAX as f64)
             .collect();
 
-        // 确保样本数量符合算法要求，但保持原始长度信息
-        let processed_samples = Self::prepare_samples_for_watermarking(&samples, algorithm)?;
-
-        // 将音频转换为二维数组进行处理
-        let data = Self::audio_to_array(&processed_samples)?;
-
         // 将水印文本转换为比特
         let watermark_bits = WatermarkUtils::string_to_bits(watermark_text);
 
-        // 嵌入水印
-        let watermarked_data = algorithm.embed(&data, &watermark_bits, strength)?;
+        // 使用音频专用DCT算法，确保无噪声
+        let ultra_low_strength = strength * 0.05; // 5%的强度，配合音频专用算法
+        println!(
+            "🔇 使用音频专用DCT水印：{:.4} (原始强度: {:.3})",
+            ultra_low_strength, strength
+        );
 
-        // 转换回音频格式，保持原始长度
-        let mut watermarked_samples = Self::array_to_audio(&watermarked_data)?;
-
-        // 截断到原始样本数量，避免时长变化
-        if watermarked_samples.len() > original_sample_count as usize {
-            watermarked_samples.truncate(original_sample_count as usize);
-        }
+        let watermarked_samples =
+            Self::ultra_gentle_embed(&samples, &watermark_bits, algorithm, ultra_low_strength)?;
 
         // 创建临时水印音频文件
         let watermarked_temp = temp_dir.join("watermarked.wav");
@@ -211,14 +204,8 @@ impl AudioWatermarker {
             .map(|s| s as f64 / i16::MAX as f64)
             .collect();
 
-        // 准备样本以适应算法
-        let processed_samples = Self::prepare_samples_for_watermarking(&samples, algorithm)?;
-
-        // 转换为ndarray
-        let data = Self::audio_to_array(&processed_samples)?;
-
-        // 提取水印比特
-        let extracted_bits = algorithm.extract(&data, watermark_length * 8)?;
+        // 使用相同的音频专用DCT提取
+        let extracted_bits = Self::ultra_gentle_extract(&samples, algorithm, watermark_length * 8)?;
 
         // 转换为字符串
         let watermark_text = WatermarkUtils::bits_to_string(&extracted_bits)?;
@@ -261,16 +248,107 @@ impl AudioWatermarker {
         let (rows, cols) = array.dim();
         let mut samples = Vec::new();
 
+        // 首先收集所有原始样本
         for i in 0..rows {
             for j in 0..cols {
-                let sample = array[[i, j]];
-                // 限制音频样本值在合理范围内
-                let clamped_sample = sample.clamp(-1.0, 1.0);
-                samples.push(clamped_sample);
+                samples.push(array[[i, j]]);
             }
         }
 
+        // 应用专业的音频处理，避免硬限幅引起的失真
+        Self::apply_professional_audio_limiting(&mut samples);
+
         Ok(samples)
+    }
+
+    /// 专业的音频限制处理，避免硬限幅失真
+    fn apply_professional_audio_limiting(samples: &mut [f64]) {
+        if samples.is_empty() {
+            return;
+        }
+
+        // 1. 分析峰值分布
+        let max_abs = samples.iter().map(|&x| x.abs()).fold(0.0f64, f64::max);
+
+        if max_abs <= 1.0 {
+            // 如果没有超限，直接返回
+            return;
+        }
+
+        println!("检测到音频峰值超限 ({:.3})，应用专业音频处理", max_abs);
+
+        // 2. 使用软限制器而不是硬限幅
+        let threshold = 0.95; // 软限制阈值
+        let ratio = 0.2; // 压缩比，更温和的处理
+
+        for sample in samples.iter_mut() {
+            *sample = Self::soft_limiter(*sample, threshold, ratio);
+        }
+
+        // 3. 应用去加重滤波，减少高频失真
+        Self::apply_deemphasis_filter(samples);
+
+        // 4. 对开头应用特殊的平滑处理
+        Self::smooth_audio_start(samples);
+    }
+
+    /// 软限制器 - 专业音频处理技术
+    fn soft_limiter(input: f64, threshold: f64, ratio: f64) -> f64 {
+        let abs_input = input.abs();
+        let sign = if input >= 0.0 { 1.0 } else { -1.0 };
+
+        if abs_input <= threshold {
+            input
+        } else {
+            // 使用tanh软限制曲线，比硬限幅平滑得多
+            let excess = abs_input - threshold;
+            let compressed_excess = excess * ratio;
+            let limited_excess = compressed_excess.tanh() * 0.05; // 很温和的限制
+            sign * (threshold + limited_excess)
+        }
+    }
+
+    /// 去加重滤波器，减少高频失真
+    fn apply_deemphasis_filter(samples: &mut [f64]) {
+        if samples.len() < 2 {
+            return;
+        }
+
+        // 简单的去加重滤波器：y[n] = x[n] + 0.95 * y[n-1]
+        let alpha = 0.95;
+        let mut prev_output = 0.0;
+
+        for sample in samples.iter_mut() {
+            let current_input = *sample;
+            let current_output = current_input + alpha * prev_output;
+            *sample = current_output;
+            prev_output = current_output;
+        }
+
+        // 应用归一化，避免滤波器引入的增益
+        let max_after_filter = samples.iter().map(|&x| x.abs()).fold(0.0f64, f64::max);
+        if max_after_filter > 0.98 {
+            let normalize_factor = 0.95 / max_after_filter;
+            for sample in samples.iter_mut() {
+                *sample *= normalize_factor;
+            }
+        }
+    }
+
+    /// 对音频开头进行特殊平滑处理
+    fn smooth_audio_start(samples: &mut [f64]) {
+        let smooth_length = (samples.len() / 100).clamp(64, 2048); // 1%的长度，最少64样本，最多2048样本
+
+        if samples.len() < smooth_length {
+            return;
+        }
+
+        // 对开头应用Hann窗函数的前半部分，实现平滑启动
+        for (i, sample) in samples.iter_mut().enumerate().take(smooth_length) {
+            let window_pos = i as f64 / smooth_length as f64;
+            let hann_factor = 0.5 * (1.0 - (2.0 * std::f64::consts::PI * window_pos).cos());
+            *sample *= hann_factor;
+        }
     }
 
     /// 写入WAV文件
@@ -461,5 +539,255 @@ impl AudioWatermarker {
         println!("音频已调整格式以适应{}算法", algorithm.name());
 
         Ok(spec)
+    }
+
+    /// 超温和音频水印嵌入 - 使用专门的音频优化DCT算法
+    fn ultra_gentle_embed(
+        samples: &[f64],
+        watermark_bits: &[u8],
+        algorithm: &dyn WatermarkAlgorithm,
+        strength: f64,
+    ) -> Result<Vec<f64>> {
+        println!("🎵 开始音频专用DCT水印嵌入，强度: {:.4}", strength);
+
+        // 检查是否是DCT算法，如果是则使用音频优化版本
+        if algorithm.name() == "DCT" {
+            // 使用专门的音频优化DCT算法
+            let dct_algorithm = DctWatermark::new();
+            let processed_samples = Self::prepare_samples_for_watermarking(samples, algorithm)?;
+            let data = Self::audio_to_array(&processed_samples)?;
+
+            // 调用音频优化的嵌入方法
+            let watermarked_data =
+                dct_algorithm.embed_audio_optimized(&data, watermark_bits, strength)?;
+            let mut watermarked_samples = Self::array_to_audio(&watermarked_data)?;
+
+            // 截断到原始长度
+            if watermarked_samples.len() > samples.len() {
+                watermarked_samples.truncate(samples.len());
+            }
+
+            // 应用轻量化的音频后处理
+            Self::apply_minimal_audio_postprocessing(&mut watermarked_samples);
+
+            println!("✅ 音频专用DCT水印嵌入完成");
+            Ok(watermarked_samples)
+        } else {
+            // 对于非DCT算法，使用原来的流程
+            let processed_samples = Self::prepare_samples_for_watermarking(samples, algorithm)?;
+            let data = Self::audio_to_array(&processed_samples)?;
+            let watermarked_data = algorithm.embed(&data, watermark_bits, strength)?;
+            let mut watermarked_samples = Self::array_to_audio(&watermarked_data)?;
+
+            if watermarked_samples.len() > samples.len() {
+                watermarked_samples.truncate(samples.len());
+            }
+
+            Self::apply_ultra_smooth_audio_pipeline(&mut watermarked_samples, samples);
+            println!("✅ 通用音频水印嵌入完成");
+            Ok(watermarked_samples)
+        }
+    }
+
+    /// 混合音频水印提取 - 音频专用嵌入但标准提取
+    fn ultra_gentle_extract(
+        samples: &[f64],
+        algorithm: &dyn WatermarkAlgorithm,
+        bit_count: usize,
+    ) -> Result<Vec<u8>> {
+        println!("🎵 开始混合音频水印提取（标准DCT提取）");
+
+        // 无论什么算法，都使用标准提取流程
+        // 因为嵌入时虽然用了音频专用算法，但基本的DCT位置是相同的
+        let processed_samples = Self::prepare_samples_for_watermarking(samples, algorithm)?;
+        let data = Self::audio_to_array(&processed_samples)?;
+        let extracted_bits = algorithm.extract(&data, bit_count)?;
+
+        println!("✅ 混合音频水印提取完成");
+        Ok(extracted_bits)
+    }
+
+    /// 高级音频平滑处理流水线 - 彻底消除artifacts和噪声
+    fn apply_ultra_smooth_audio_pipeline(
+        watermarked_samples: &mut [f64],
+        original_samples: &[f64],
+    ) {
+        if watermarked_samples.is_empty() || original_samples.is_empty() {
+            return;
+        }
+
+        println!("🔧 应用高级音频平滑处理流水线...");
+
+        // 第1步：全局动态范围分析与保护性归一化
+        let max_abs = watermarked_samples
+            .iter()
+            .map(|&x| x.abs())
+            .fold(0.0f64, f64::max);
+        if max_abs > 0.99 {
+            let protection_factor = 0.95 / max_abs;
+            for sample in watermarked_samples.iter_mut() {
+                *sample *= protection_factor;
+            }
+            println!("  📊 应用了保护性归一化，因子: {:.4}", protection_factor);
+        }
+
+        // 第2步：温和的全局低通滤波，减少高频artifacts
+        Self::apply_global_gentle_lowpass(watermarked_samples);
+
+        // 第3步：自适应动态范围压缩
+        Self::apply_adaptive_compression(watermarked_samples);
+
+        // 第4步：边界平滑处理（开头和结尾）
+        Self::apply_boundary_smoothing(watermarked_samples);
+
+        // 第5步：最终的感知优化限制
+        Self::apply_perceptual_limiting(watermarked_samples);
+
+        println!("✅ 高级音频平滑处理完成");
+    }
+
+    /// 全局温和低通滤波
+    fn apply_global_gentle_lowpass(samples: &mut [f64]) {
+        if samples.len() < 3 {
+            return;
+        }
+
+        // 使用非常温和的三点移动平均滤波器
+        let alpha = 0.02; // 极小的滤波强度
+        let mut filtered = samples.to_vec();
+
+        for i in 1..samples.len() - 1 {
+            let smoothed = (samples[i - 1] + samples[i] * 2.0 + samples[i + 1]) * 0.25;
+            filtered[i] = samples[i] * (1.0 - alpha) + smoothed * alpha;
+        }
+
+        samples.copy_from_slice(&filtered);
+        println!("  🎛️ 应用了全局温和低通滤波");
+    }
+
+    /// 自适应动态范围压缩
+    fn apply_adaptive_compression(samples: &mut [f64]) {
+        let window_size = 1024;
+        let step_size = 512; // 50% overlap
+
+        for start in (0..samples.len()).step_by(step_size) {
+            let end = (start + window_size).min(samples.len());
+            let window = &mut samples[start..end];
+
+            // 计算窗口内的RMS
+            let rms = (window.iter().map(|&x| x * x).sum::<f64>() / window.len() as f64).sqrt();
+
+            if rms > 0.1 {
+                // 只对相对较强的信号应用压缩
+                let compression_ratio = 0.8 + 0.2 * (0.1 / rms).min(1.0);
+                for sample in window.iter_mut() {
+                    *sample *= compression_ratio;
+                }
+            }
+        }
+
+        println!("  🎚️ 应用了自适应动态范围压缩");
+    }
+
+    /// 边界平滑处理
+    fn apply_boundary_smoothing(samples: &mut [f64]) {
+        let fade_length = (samples.len() / 200).clamp(32, 512); // 0.5%的长度，32-512样本
+
+        // 开头淡入
+        for i in 0..fade_length.min(samples.len()) {
+            let fade_factor = (i as f64 / fade_length as f64).powf(0.5); // 平方根曲线，更平滑
+            samples[i] *= fade_factor;
+        }
+
+        // 结尾淡出
+        let start_fade_out = samples.len().saturating_sub(fade_length);
+        for i in start_fade_out..samples.len() {
+            let fade_factor = ((samples.len() - i) as f64 / fade_length as f64).powf(0.5);
+            samples[i] *= fade_factor;
+        }
+
+        println!("  🎭 应用了边界平滑处理，淡入淡出长度: {}样本", fade_length);
+    }
+
+    /// 感知优化限制
+    fn apply_perceptual_limiting(samples: &mut [f64]) {
+        for sample in samples.iter_mut() {
+            let abs_val = sample.abs();
+            if abs_val > 0.95 {
+                let sign = if *sample >= 0.0 { 1.0 } else { -1.0 };
+                // 使用软限制曲线
+                let excess = abs_val - 0.95;
+                let limited_excess = excess.tanh() * 0.04; // 非常温和的限制
+                *sample = sign * (0.95 + limited_excess);
+            }
+        }
+
+        println!("  🔊 应用了感知优化限制");
+    }
+
+    /// 轻量化的音频后处理 - 专为音频优化DCT设计
+    fn apply_minimal_audio_postprocessing(samples: &mut [f64]) {
+        if samples.is_empty() {
+            return;
+        }
+
+        println!("🔧 应用轻量化音频后处理...");
+
+        // 第1步：保护性限制（很温和）
+        let max_abs = samples.iter().map(|&x| x.abs()).fold(0.0f64, f64::max);
+        if max_abs > 1.0 {
+            let protection_factor = 0.98 / max_abs;
+            for sample in samples.iter_mut() {
+                *sample *= protection_factor;
+            }
+            println!("  📊 应用了保护性归一化，因子: {:.4}", protection_factor);
+        }
+
+        // 第2步：极轻微的平滑处理
+        Self::apply_ultra_light_smoothing(samples);
+
+        // 第3步：边界柔化（很短的淡入淡出）
+        Self::apply_light_boundary_softening(samples);
+
+        println!("✅ 轻量化音频后处理完成");
+    }
+
+    /// 超轻微的平滑处理
+    fn apply_ultra_light_smoothing(samples: &mut [f64]) {
+        if samples.len() < 3 {
+            return;
+        }
+
+        // 使用极轻微的三点平滑
+        let alpha = 0.005; // 极小的平滑强度
+        let mut smoothed = samples.to_vec();
+
+        for i in 1..samples.len() - 1 {
+            let avg = (samples[i - 1] + samples[i] + samples[i + 1]) / 3.0;
+            smoothed[i] = samples[i] * (1.0 - alpha) + avg * alpha;
+        }
+
+        samples.copy_from_slice(&smoothed);
+        println!("🎛️ 应用了超轻微平滑处理");
+    }
+
+    /// 轻微的边界柔化
+    fn apply_light_boundary_softening(samples: &mut [f64]) {
+        let fade_length = (samples.len() / 500).clamp(16, 128); // 很短的淡入淡出
+
+        // 开头轻微淡入
+        for i in 0..fade_length.min(samples.len()) {
+            let fade_factor = (i as f64 / fade_length as f64).sqrt();
+            samples[i] *= fade_factor;
+        }
+
+        // 结尾轻微淡出
+        let start_fade_out = samples.len().saturating_sub(fade_length);
+        for i in start_fade_out..samples.len() {
+            let fade_factor = ((samples.len() - i) as f64 / fade_length as f64).sqrt();
+            samples[i] *= fade_factor;
+        }
+
+        println!("🎭 应用了轻微边界柔化，长度: {}样本", fade_length);
     }
 }
