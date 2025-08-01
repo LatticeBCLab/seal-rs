@@ -58,8 +58,7 @@ impl AudioWatermarker {
         // 使用音频专用DCT算法，确保无噪声
         let ultra_low_strength = strength * 0.05; // 5%的强度，配合音频专用算法
         println!(
-            "🔇 使用音频专用DCT水印：{:.4} (原始强度: {:.3})",
-            ultra_low_strength, strength
+            "🔇 使用音频专用DCT水印：{ultra_low_strength:.4} (原始强度: {strength:.3})"
         );
 
         let watermarked_samples =
@@ -79,7 +78,7 @@ impl AudioWatermarker {
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
 
-        println!("水印已成功嵌入到音频中: {:?}", output_path);
+        println!("水印已成功嵌入到音频中: {output_path:?}");
         println!("使用算法: {}", algorithm.name());
         println!("水印内容: {watermark_text}");
         println!("嵌入强度: {strength}");
@@ -275,7 +274,7 @@ impl AudioWatermarker {
             return;
         }
 
-        println!("检测到音频峰值超限 ({:.3})，应用专业音频处理", max_abs);
+        println!("检测到音频峰值超限 ({max_abs:.3})，应用专业音频处理");
 
         // 2. 使用软限制器而不是硬限幅
         let threshold = 0.95; // 软限制阈值
@@ -548,7 +547,7 @@ impl AudioWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
     ) -> Result<Vec<f64>> {
-        println!("🎵 开始音频专用DCT水印嵌入，强度: {:.4}", strength);
+        println!("🎵 开始音频专用DCT水印嵌入，强度: {strength:.4}");
 
         // 检查是否是DCT算法，如果是则使用音频优化版本
         if algorithm.name() == "DCT" {
@@ -628,7 +627,7 @@ impl AudioWatermarker {
             for sample in watermarked_samples.iter_mut() {
                 *sample *= protection_factor;
             }
-            println!("  📊 应用了保护性归一化，因子: {:.4}", protection_factor);
+            println!("  📊 应用了保护性归一化，因子: {protection_factor:.4}");
         }
 
         // 第2步：温和的全局低通滤波，减少高频artifacts
@@ -706,7 +705,7 @@ impl AudioWatermarker {
             samples[i] *= fade_factor;
         }
 
-        println!("  🎭 应用了边界平滑处理，淡入淡出长度: {}样本", fade_length);
+        println!("  🎭 应用了边界平滑处理，淡入淡出长度: {fade_length}样本");
     }
 
     /// 感知优化限制
@@ -740,7 +739,7 @@ impl AudioWatermarker {
             for sample in samples.iter_mut() {
                 *sample *= protection_factor;
             }
-            println!("  📊 应用了保护性归一化，因子: {:.4}", protection_factor);
+            println!("  📊 应用了保护性归一化，因子: {protection_factor:.4}");
         }
 
         // 第2步：极轻微的平滑处理
@@ -768,7 +767,7 @@ impl AudioWatermarker {
         }
 
         samples.copy_from_slice(&smoothed);
-        println!("🎛️ 应用了超轻微平滑处理");
+        println!("🎛️  应用了超轻微平滑处理");
     }
 
     /// 轻微的边界柔化
@@ -788,6 +787,6 @@ impl AudioWatermarker {
             samples[i] *= fade_factor;
         }
 
-        println!("🎭 应用了轻微边界柔化，长度: {}样本", fade_length);
+        println!("🎭 应用了轻微边界柔化，长度: {fade_length}样本");
     }
 }
