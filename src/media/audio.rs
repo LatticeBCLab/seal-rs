@@ -57,9 +57,7 @@ impl AudioWatermarker {
 
         // 使用音频专用DCT算法，确保无噪声
         let ultra_low_strength = strength * 0.05; // 5%的强度，配合音频专用算法
-        println!(
-            "🔇 使用音频专用DCT水印：{ultra_low_strength:.4} (原始强度: {strength:.3})"
-        );
+        println!("🔇 使用音频专用DCT水印：{ultra_low_strength:.4} (原始强度: {strength:.3})");
 
         let watermarked_samples =
             Self::ultra_gentle_embed(&samples, &watermark_bits, algorithm, ultra_low_strength)?;
