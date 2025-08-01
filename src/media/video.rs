@@ -25,7 +25,9 @@ impl VideoWatermarker {
         let progress = ProgressBar::new(5);
         progress.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
                 .unwrap()
                 .progress_chars("█▉▊▋▌▍▎▏  "),
         );
@@ -58,12 +60,14 @@ impl VideoWatermarker {
         // 处理每一帧，添加水印
         progress.set_message("🎯  处理视频帧 (添加水印)".to_string());
         let frame_files = Self::get_frame_files(&frames_dir)?;
-        
+
         // 创建帧处理进度条
         let frame_progress = ProgressBar::new(frame_files.len() as u64);
         frame_progress.set_style(
             ProgressStyle::default_bar()
-                .template("   {spinner:.green} [{elapsed_precise}] [{bar:30.yellow/red}] {pos}/{len} 帧")
+                .template(
+                    "   {spinner:.green} [{elapsed_precise}] [{bar:30.yellow/red}] {pos}/{len} 帧",
+                )
                 .unwrap()
                 .progress_chars("█▉▊▋▌▍▎▏  "),
         );
@@ -72,7 +76,11 @@ impl VideoWatermarker {
             Self::process_frame(frame_file, watermark_text, algorithm, strength)?;
             frame_progress.inc(1);
         }
-        frame_progress.finish_with_message(format!("✅ 已处理 {} 帧", frame_files.len()).green().to_string());
+        frame_progress.finish_with_message(
+            format!("✅ 已处理 {} 帧", frame_files.len())
+                .green()
+                .to_string(),
+        );
         progress.inc(1);
 
         // 重新组合视频
@@ -82,7 +90,7 @@ impl VideoWatermarker {
 
         // 完成并清理
         progress.finish_with_message("🎉 视频水印嵌入完成!".green().bold().to_string());
-        
+
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
         println!("{} {}", "🧹".blue(), "临时文件已清理".blue());
@@ -102,7 +110,9 @@ impl VideoWatermarker {
         let progress = ProgressBar::new(3);
         progress.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
                 .unwrap()
                 .progress_chars("█▉▊▋▌▍▎▏  "),
         );

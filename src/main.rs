@@ -6,7 +6,11 @@ use std::process;
 fn main() -> Result<()> {
     // 确保 FFmpeg 可用
     if let Err(e) = ffmpeg_sidecar::download::auto_download() {
-        eprintln!("{} {}", "警告:".yellow().bold(), format!("无法下载 FFmpeg: {}", e).red());
+        eprintln!(
+            "{} {}",
+            "警告:".yellow().bold(),
+            format!("无法下载 FFmpeg: {}", e).red()
+        );
         eprintln!("{}", "请确保系统中已安装 FFmpeg，或者检查网络连接".yellow());
     }
 
@@ -48,7 +52,11 @@ fn run(cli: Cli) -> Result<()> {
             match media_type {
                 MediaType::Image => {
                     if cli.verbose {
-                        println!("{} {}", "🖼️  处理图片文件:".blue().bold(), format!("{:?}", input).cyan());
+                        println!(
+                            "{} {}",
+                            "🖼️  处理图片文件:".blue().bold(),
+                            format!("{:?}", input).cyan()
+                        );
 
                         // 检查水印容量
                         if !ImageWatermarker::check_watermark_capacity(
@@ -56,7 +64,11 @@ fn run(cli: Cli) -> Result<()> {
                             watermark,
                             watermark_algorithm.as_ref(),
                         )? {
-                            println!("{} {}", "⚠️".yellow(), "警告: 水印可能太长，可能影响嵌入效果".yellow());
+                            println!(
+                                "{} {}",
+                                "⚠️".yellow(),
+                                "警告: 水印可能太长，可能影响嵌入效果".yellow()
+                            );
                         }
                     }
 
@@ -70,7 +82,11 @@ fn run(cli: Cli) -> Result<()> {
                 }
                 MediaType::Audio => {
                     if cli.verbose {
-                        println!("{} {}", "🎧  处理音频文件:".blue().bold(), format!("{:?}", input).cyan());
+                        println!(
+                            "{} {}",
+                            "🎧  处理音频文件:".blue().bold(),
+                            format!("{:?}", input).cyan()
+                        );
 
                         // 检查水印容量
                         if !AudioWatermarker::check_watermark_capacity(
@@ -78,7 +94,11 @@ fn run(cli: Cli) -> Result<()> {
                             watermark,
                             watermark_algorithm.as_ref(),
                         )? {
-                            println!("{} {}", "⚠️".yellow(), "警告: 水印可能太长，可能影响嵌入效果".yellow());
+                            println!(
+                                "{} {}",
+                                "⚠️".yellow(),
+                                "警告: 水印可能太长，可能影响嵌入效果".yellow()
+                            );
                         }
                     }
 
@@ -92,7 +112,11 @@ fn run(cli: Cli) -> Result<()> {
                 }
                 MediaType::Video => {
                     if cli.verbose {
-                        println!("{} {}", "🎥  处理视频文件:".blue().bold(), format!("{:?}", input).cyan());
+                        println!(
+                            "{} {}",
+                            "🎥  处理视频文件:".blue().bold(),
+                            format!("{:?}", input).cyan()
+                        );
 
                         // 检查水印容量
                         if !VideoWatermarker::check_watermark_capacity(
@@ -100,7 +124,11 @@ fn run(cli: Cli) -> Result<()> {
                             watermark,
                             watermark_algorithm.as_ref(),
                         )? {
-                            println!("{} {}", "⚠️".yellow(), "警告: 水印可能太长，可能影响嵌入效果".yellow());
+                            println!(
+                                "{} {}",
+                                "⚠️".yellow(),
+                                "警告: 水印可能太长，可能影响嵌入效果".yellow()
+                            );
                         }
                     }
 
@@ -141,8 +169,16 @@ fn run(cli: Cli) -> Result<()> {
             let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone());
 
             if cli.verbose {
-                println!("{} {}", "🔍  从文件提取水印:".blue().bold(), format!("{:?}", input).cyan());
-                println!("{} {}", "🔧  使用算法:".blue().bold(), format!("{:?}", algorithm).cyan());
+                println!(
+                    "{} {}",
+                    "🔍  从文件提取水印:".blue().bold(),
+                    format!("{:?}", input).cyan()
+                );
+                println!(
+                    "{} {}",
+                    "🔧  使用算法:".blue().bold(),
+                    format!("{:?}", algorithm).cyan()
+                );
             }
 
             let watermark_length = *length;
@@ -170,13 +206,25 @@ fn run(cli: Cli) -> Result<()> {
             if let Some(output_path) = output {
                 MediaUtils::ensure_output_dir(output_path)?;
                 std::fs::write(output_path, &extracted_watermark)?;
-                println!("{} {}", "💾".green(), format!("提取的水印已保存到: {:?}", output_path).green());
+                println!(
+                    "{} {}",
+                    "💾".green(),
+                    format!("提取的水印已保存到: {:?}", output_path).green()
+                );
             }
 
             // 总是在控制台显示结果
             println!("\n{}", "=== 提取结果 ===".cyan().bold());
-            println!("{} {}", "📜  水印内容:".blue().bold(), extracted_watermark.green());
-            println!("{} {}", "📊  水印长度:".blue().bold(), format!("{} 字符", extracted_watermark.len()).yellow());
+            println!(
+                "{} {}",
+                "📜  水印内容:".blue().bold(),
+                extracted_watermark.green()
+            );
+            println!(
+                "{} {}",
+                "📊  水印长度:".blue().bold(),
+                format!("{} 字符", extracted_watermark.len()).yellow()
+            );
 
             if cli.verbose {
                 println!("{} {}", "✅".green(), "水印提取完成!".green().bold());

@@ -17,7 +17,14 @@ impl ImageWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
     ) -> Result<()> {
-        Self::embed_watermark_with_options(input_path, output_path, watermark_text, algorithm, strength, false)
+        Self::embed_watermark_with_options(
+            input_path,
+            output_path,
+            watermark_text,
+            algorithm,
+            strength,
+            false,
+        )
     }
 
     /// 嵌入水印到图片（带选项控制）
@@ -73,7 +80,11 @@ impl ImageWatermarker {
 
         // 根据 silent 参数决定是否输出日志
         if !silent {
-            println!("{} {}", "🖼️".green(), format!("水印已成功嵌入到图片中: {:?}", output_path.as_ref()).green());
+            println!(
+                "{} {}",
+                "🖼️".green(),
+                format!("水印已成功嵌入到图片中: {:?}", output_path.as_ref()).green()
+            );
             println!("使用算法: {}", algorithm.name());
             println!("水印内容: {watermark_text}");
             println!("嵌入强度: {strength}");

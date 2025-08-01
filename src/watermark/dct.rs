@@ -134,8 +134,8 @@ impl DctWatermark {
             }
         }
 
-        // DCT-III已经是正确缩放的逆变换，不需要额外除法
-        result
+        // DCT-III需要除以2N来得到正确的逆变换
+        result.mapv(|x| x / (2.0 * cols as f64))
     }
 
     /// 获取中频DCT系数的位置（适合嵌入水印）
@@ -163,6 +163,33 @@ impl DctWatermark {
             (2, 5),
             (1, 6),
         ]
+    }
+
+    /// 计算块的方差用于感知加权
+    fn calculate_block_variance(&self, block: &Array2<f64>) -> f64 {
+        let mean = block.mean().unwrap_or(0.0);
+        let variance =
+            block.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (block.len() as f64);
+        variance
+    }
+
+    /// 计算自适应阈值
+    fn calculate_adaptive_threshold(&self, dct_block: &Array2<f64>, base_strength: f64) -> f64 {
+        let positions = self.get_mid_frequency_positions();
+        let mut coeffs = Vec::new();
+
+        for &(u, v) in &positions {
+            if u < self.block_size && v < self.block_size {
+                coeffs.push(dct_block[[u, v]].abs());
+            }
+        }
+
+        if coeffs.is_empty() {
+            return 2.0;
+        }
+
+        let mean_coeff = coeffs.iter().sum::<f64>() / coeffs.len() as f64;
+        (mean_coeff * base_strength * 0.1).max(1.0).min(5.0)
     }
 }
 
@@ -223,17 +250,38 @@ impl WatermarkAlgorithm for DctWatermark {
                 let (u, v) = positions[pos_idx];
 
                 if u < self.block_size && v < self.block_size {
-                    // 使用符号嵌入法：确保系数符号与水印比特对应
+                    // 条件符号嵌入法：智能选择温和调整或符号强制
                     let coeff = dct_block[[u, v]];
-                    let min_strength = 10.0; // 最小强度值，确保系数有足够的幅度
-                    let magnitude = coeff.abs().max(min_strength);
+                    let magnitude = coeff.abs();
+
+                    // 计算自适应阈值和感知加权
+                    let adaptive_threshold =
+                        self.calculate_adaptive_threshold(&dct_block, strength);
+                    let block_variance = self.calculate_block_variance(&block);
+                    let perceptual_weight = if block_variance < 10.0 { 0.5 } else { 1.0 };
+
+                    let target_change = strength * magnitude.max(1.0) * perceptual_weight;
 
                     if bit == 1 {
-                        // bit=1时，强制系数为正数
-                        dct_block[[u, v]] = magnitude + strength * magnitude;
+                        // 目标：确保系数为正且足够大
+                        if coeff + target_change >= adaptive_threshold {
+                            // 温和增加就足够了，保持原有符号特性
+                            dct_block[[u, v]] = coeff + target_change;
+                        } else {
+                            // 需要符号强制，但使用最小必要强度
+                            dct_block[[u, v]] =
+                                magnitude.max(adaptive_threshold) + target_change * 0.5;
+                        }
                     } else {
-                        // bit=0时，强制系数为负数
-                        dct_block[[u, v]] = -(magnitude + strength * magnitude);
+                        // 目标：确保系数为负且绝对值够大
+                        if coeff - target_change <= -adaptive_threshold {
+                            // 温和减少就足够了，保持原有符号特性
+                            dct_block[[u, v]] = coeff - target_change;
+                        } else {
+                            // 需要符号强制，但使用最小必要强度
+                            dct_block[[u, v]] =
+                                -(magnitude.max(adaptive_threshold) + target_change * 0.5);
+                        }
                     }
                 }
 
@@ -315,6 +363,6 @@ impl WatermarkAlgorithm for DctWatermark {
     }
 
     fn name(&self) -> &'static str {
-        "DCT (rustdct)"
+        "DCT"
     }
 }

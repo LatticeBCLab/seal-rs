@@ -54,7 +54,7 @@ impl AudioWatermarker {
 
         // 确保样本数量符合算法要求，但保持原始长度信息
         let processed_samples = Self::prepare_samples_for_watermarking(&samples, algorithm)?;
-        
+
         // 将音频转换为二维数组进行处理
         let data = Self::audio_to_array(&processed_samples)?;
 
@@ -66,7 +66,7 @@ impl AudioWatermarker {
 
         // 转换回音频格式，保持原始长度
         let mut watermarked_samples = Self::array_to_audio(&watermarked_data)?;
-        
+
         // 截断到原始样本数量，避免时长变化
         if watermarked_samples.len() > original_sample_count as usize {
             watermarked_samples.truncate(original_sample_count as usize);
@@ -77,7 +77,11 @@ impl AudioWatermarker {
         Self::write_wav(&watermarked_temp, &watermarked_samples, spec)?;
 
         // 使用ffmpeg转换回原始格式
-        Self::convert_to_original_format(&watermarked_temp, &input_path.to_path_buf(), &output_path.to_path_buf())?;
+        Self::convert_to_original_format(
+            &watermarked_temp,
+            &input_path.to_path_buf(),
+            &output_path.to_path_buf(),
+        )?;
 
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
@@ -105,31 +109,36 @@ impl AudioWatermarker {
         let status = child.wait().map_err(WatermarkError::Io)?;
 
         if !status.success() {
-            return Err(WatermarkError::ProcessingError("音频格式标准化失败".to_string()));
+            return Err(WatermarkError::ProcessingError(
+                "音频格式标准化失败".to_string(),
+            ));
         }
 
         Ok(())
     }
 
     /// 准备样本以适应水印算法
-    fn prepare_samples_for_watermarking(samples: &[f64], algorithm: &dyn WatermarkAlgorithm) -> Result<Vec<f64>> {
+    fn prepare_samples_for_watermarking(
+        samples: &[f64],
+        algorithm: &dyn WatermarkAlgorithm,
+    ) -> Result<Vec<f64>> {
         let len = samples.len();
         let matrix_size = (len as f64).sqrt().ceil() as usize;
-        
+
         let required_size = match algorithm.name() {
             name if name.contains("DCT") => {
                 let adjusted_size = matrix_size.div_ceil(8) * 8;
                 adjusted_size * adjusted_size
-            },
+            }
             name if name.contains("DWT") => {
                 let adjusted_size = matrix_size.next_power_of_two();
                 adjusted_size * adjusted_size
-            },
+            }
             _ => return Err(WatermarkError::Algorithm("未知算法".to_string())),
         };
 
         let mut prepared_samples = samples.to_vec();
-        
+
         if prepared_samples.len() < required_size {
             // 使用零填充而不是重复填充，避免引入噪声
             prepared_samples.resize(required_size, 0.0);
@@ -142,9 +151,9 @@ impl AudioWatermarker {
 
     /// 转换回原始格式
     fn convert_to_original_format<P: AsRef<Path>>(
-        watermarked_path: P, 
-        _original_path: P, 
-        output_path: P
+        watermarked_path: P,
+        _original_path: P,
+        output_path: P,
     ) -> Result<()> {
         // 直接复制水印音频，保持WAV格式
         let mut command = FfmpegCommand::new();
@@ -157,7 +166,9 @@ impl AudioWatermarker {
         let status = child.wait().map_err(WatermarkError::Io)?;
 
         if !status.success() {
-            return Err(WatermarkError::ProcessingError("音频格式转换失败".to_string()));
+            return Err(WatermarkError::ProcessingError(
+                "音频格式转换失败".to_string(),
+            ));
         }
 
         Ok(())
