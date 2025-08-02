@@ -9,7 +9,7 @@ fn main() -> Result<()> {
         eprintln!(
             "{} {}",
             "警告:".yellow().bold(),
-            format!("无法下载 FFmpeg: {}", e).red()
+            format!("无法下载 FFmpeg: {e}").red()
         );
         eprintln!("{}", "请确保系统中已安装 FFmpeg，或者检查网络连接".yellow());
     }
@@ -36,7 +36,7 @@ fn run(cli: Cli) -> Result<()> {
             if !MediaUtils::file_exists(input) {
                 return Err(WatermarkError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("输入文件不存在: {:?}", input),
+                    format!("输入文件不存在: {input:?}"),
                 )));
             }
 
@@ -55,7 +55,7 @@ fn run(cli: Cli) -> Result<()> {
                         println!(
                             "{} {}",
                             "🖼️  处理图片文件:".blue().bold(),
-                            format!("{:?}", input).cyan()
+                            format!("{input:?}").cyan()
                         );
 
                         // 检查水印容量
@@ -85,7 +85,7 @@ fn run(cli: Cli) -> Result<()> {
                         println!(
                             "{} {}",
                             "🎧  处理音频文件:".blue().bold(),
-                            format!("{:?}", input).cyan()
+                            format!("{input:?}").cyan()
                         );
 
                         // 检查水印容量
@@ -115,7 +115,7 @@ fn run(cli: Cli) -> Result<()> {
                         println!(
                             "{} {}",
                             "🎥  处理视频文件:".blue().bold(),
-                            format!("{:?}", input).cyan()
+                            format!("{input:?}").cyan()
                         );
 
                         // 检查水印容量
@@ -158,7 +158,7 @@ fn run(cli: Cli) -> Result<()> {
             if !MediaUtils::file_exists(input) {
                 return Err(WatermarkError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("输入文件不存在: {:?}", input),
+                    format!("输入文件不存在: {input:?}"),
                 )));
             }
 
@@ -172,12 +172,12 @@ fn run(cli: Cli) -> Result<()> {
                 println!(
                     "{} {}",
                     "🔍  从文件提取水印:".blue().bold(),
-                    format!("{:?}", input).cyan()
+                    format!("{input:?}").cyan()
                 );
                 println!(
                     "{} {}",
                     "🔧  使用算法:".blue().bold(),
-                    format!("{:?}", algorithm).cyan()
+                    format!("{algorithm:?}").cyan()
                 );
             }
 
@@ -209,7 +209,7 @@ fn run(cli: Cli) -> Result<()> {
                 println!(
                     "{} {}",
                     "💾".green(),
-                    format!("提取的水印已保存到: {:?}", output_path).green()
+                    format!("提取的水印已保存到: {output_path:?}").green()
                 );
             }
 

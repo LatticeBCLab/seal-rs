@@ -129,11 +129,16 @@ impl AudioWatermarker {
 
         let mut prepared_samples = samples.to_vec();
 
-        if prepared_samples.len() < required_size {
-            // 使用零填充而不是重复填充，避免引入噪声
-            prepared_samples.resize(required_size, 0.0);
-        } else if prepared_samples.len() > required_size {
-            prepared_samples.truncate(required_size);
+        use std::cmp::Ordering;
+        match prepared_samples.len().cmp(&required_size) {
+            Ordering::Less => {
+                // 使用零填充而不是重复填充，避免引入噪声
+                prepared_samples.resize(required_size, 0.0);
+            }
+            Ordering::Greater => {
+                prepared_samples.truncate(required_size);
+            }
+            Ordering::Equal => {}
         }
 
         Ok(prepared_samples)
@@ -522,12 +527,17 @@ impl AudioWatermarker {
         let required_samples = required_size * required_size;
         let mut adjusted_samples = samples;
 
-        if adjusted_samples.len() < required_samples {
-            // 用零填充
-            adjusted_samples.resize(required_samples, 0.0);
-        } else if adjusted_samples.len() > required_samples {
-            // 截断
-            adjusted_samples.truncate(required_samples);
+        use std::cmp::Ordering;
+        match adjusted_samples.len().cmp(&required_samples) {
+            Ordering::Less => {
+                // 用零填充
+                adjusted_samples.resize(required_samples, 0.0);
+            }
+            Ordering::Greater => {
+                // 截断
+                adjusted_samples.truncate(required_samples);
+            }
+            Ordering::Equal => {}
         }
 
         // 写入调整后的音频
