@@ -58,6 +58,14 @@ pub enum Commands {
         /// 输出水印到文件（可选）
         #[arg(short, long)]
         output: Option<PathBuf>,
+
+        /// 视频采样帧数（仅对视频有效，默认7帧）
+        #[arg(long, default_value = "7")]
+        sample_frames: usize,
+
+        /// 置信度阈值（仅对视频有效，0.0-1.0，默认0.6）
+        #[arg(long, default_value = "0.6")]
+        confidence_threshold: f64,
     },
 }
 

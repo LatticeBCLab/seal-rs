@@ -400,12 +400,6 @@ impl DctWatermark {
         let mut watermark_idx = 0;
         let mut dct_algorithm = DctWatermark::new();
 
-        println!(
-            "🎵 使用音频优化的DCT水印嵌入，块数: {}, 水印长度: {}",
-            total_blocks,
-            watermark.len()
-        );
-
         for block_y in 0..blocks_h {
             for block_x in 0..blocks_w {
                 if watermark_idx >= watermark.len() {
@@ -477,8 +471,6 @@ impl DctWatermark {
         let audio_positions = self.get_mid_frequency_positions();
         let mut extracted_bits = Vec::new();
         let mut dct_algorithm = DctWatermark::new();
-
-        println!("🎵 使用音频优化的DCT水印提取");
 
         for block_y in 0..blocks_h {
             for block_x in 0..blocks_w {

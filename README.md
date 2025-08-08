@@ -67,6 +67,28 @@ seal embed -i video.mp4 -o video_watermarked.mp4 -w "版权所有" -s 0.1
 seal embed -i video.mp4 -o video_watermarked.mp4 -w "版权所有" --lossless
 ```
 
+控制台 JSON 输出示例：
+
+- 图片嵌入：
+
+```json
+{"status":"success","action":"embed","input":"/path/photo.jpg","output":"/path/photo_watermarked.jpg","algorithm":"Dct","media_type":"Image","strength":0.1,"lossless":false}
+```
+
+- 音频嵌入：
+
+```json
+{"status":"success","action":"embed","input":"/path/audio.wav","output":"/path/audio_watermarked.wav","algorithm":"Dct","media_type":"Audio","strength":0.05,"lossless":false}
+```
+
+- 视频嵌入：
+
+```json
+{"status":"success","action":"embed","input":"/path/video.mp4","output":"/path/video_watermarked.mp4","algorithm":"Dct","media_type":"Video","strength":0.1,"lossless":false,"processed_frames":12345}
+```
+
+说明：`processed_frames` 为嵌入阶段统计信息，便于后续估算提取的采样规模，无需作为参数传入。
+
 #### 提取水印 (extract)
 
 ```bash
@@ -80,6 +102,12 @@ seal extract -i <输入文件> -l <长度> [-a <算法>] [-o <输出文件>]
 - `-o, --output <文件>`: 保存提取水印的文件 (可选)
 - `-v, --verbose`: 详细输出
 
+仅对视频有效的可选参数：
+- `--sample-frames <N>`: 参与投票的采样帧数（默认 7）
+- `--confidence-threshold <f>`: 最低置信度阈值（默认 0.6，范围 0.0-1.0）
+
+提示：`--sample-frames` 越大越稳但越慢，通常推荐 5–15 之间权衡速度与稳健性。
+
 **示例:**
 
 ```bash
@@ -90,7 +118,27 @@ seal extract -i photo_watermarked.jpg -l 4
 seal extract -i audio_watermarked.wav -l 6 -o extracted_watermark.txt
 
 # 从视频提取水印
-seal extract -i video_watermarked.mp4 -l 4
+seal extract -i video_watermarked.mp4 -l 14 --sample-frames 7 --confidence-threshold 0.6
+```
+
+控制台 JSON 输出示例：
+
+- 图片提取：
+
+```json
+{"status":"success","action":"extract","input":"/path/photo_watermarked.jpg","algorithm":"Dct","media_type":"Image","length":4,"watermark":"ABCD","output":null}
+```
+
+- 音频提取：
+
+```json
+{"status":"success","action":"extract","input":"/path/audio_watermarked.wav","algorithm":"Dct","media_type":"Audio","length":6,"watermark":"我的音乐","output":null}
+```
+
+- 视频提取（含多帧投票信息）：
+
+```json
+{"status":"success","action":"extract","input":"/path/video_watermarked.mp4","algorithm":"Dct","media_type":"Video","length":14,"watermark":"copyright@zkjg","output":null,"confidence":1.0,"sample_frames_requested":7,"actual_frames_used":7,"confidence_threshold":0.6}
 ```
 
 ## 算法说明

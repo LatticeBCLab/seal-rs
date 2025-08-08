@@ -57,7 +57,6 @@ impl AudioWatermarker {
 
         // 使用音频专用DCT算法，确保无噪声
         let ultra_low_strength = strength * 0.05; // 5%的强度，配合音频专用算法
-        println!("🔇 使用音频专用DCT水印：{ultra_low_strength:.4} (原始强度: {strength:.3})");
 
         let watermarked_samples =
             Self::ultra_gentle_embed(&samples, &watermark_bits, algorithm, ultra_low_strength)?;
@@ -75,11 +74,6 @@ impl AudioWatermarker {
 
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
-
-        println!("水印已成功嵌入到音频中: {output_path:?}");
-        println!("使用算法: {}", algorithm.name());
-        println!("水印内容: {watermark_text}");
-        println!("嵌入强度: {strength}");
 
         Ok(())
     }
@@ -215,10 +209,6 @@ impl AudioWatermarker {
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
 
-        println!("水印提取完成:");
-        println!("使用算法: {}", algorithm.name());
-        println!("提取到的水印: {watermark_text}");
-
         Ok(watermark_text)
     }
 
@@ -276,8 +266,6 @@ impl AudioWatermarker {
             // 如果没有超限，直接返回
             return;
         }
-
-        println!("检测到音频峰值超限 ({max_abs:.3})，应用专业音频处理");
 
         // 2. 使用软限制器而不是硬限幅
         let threshold = 0.95; // 软限制阈值
@@ -464,7 +452,7 @@ impl AudioWatermarker {
 
         // 转换为单声道
         if spec.channels != 1 {
-            println!("将音频转换为单声道...");
+            eprintln!("将音频转换为单声道...");
             // 这里简化处理，实际应该实现立体声到单声道的转换
             spec.channels = 1;
         }
@@ -543,8 +531,6 @@ impl AudioWatermarker {
         // 写入调整后的音频
         Self::write_wav(&output_path, &adjusted_samples, spec)?;
 
-        println!("音频已调整格式以适应{}算法", algorithm.name());
-
         Ok(spec)
     }
 
@@ -555,8 +541,6 @@ impl AudioWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
     ) -> Result<Vec<f64>> {
-        println!("🎵 开始音频专用DCT水印嵌入，强度: {strength:.4}");
-
         // 检查是否是DCT算法，如果是则使用音频优化版本
         if algorithm.name() == "DCT" {
             // 使用专门的音频优化DCT算法
@@ -577,7 +561,6 @@ impl AudioWatermarker {
             // 应用轻量化的音频后处理
             Self::apply_minimal_audio_postprocessing(&mut watermarked_samples);
 
-            println!("✅ 音频专用DCT水印嵌入完成");
             Ok(watermarked_samples)
         } else {
             // 对于非DCT算法，使用原来的流程
@@ -591,7 +574,7 @@ impl AudioWatermarker {
             }
 
             Self::apply_ultra_smooth_audio_pipeline(&mut watermarked_samples, samples);
-            println!("✅ 通用音频水印嵌入完成");
+            eprintln!("✅ 通用音频水印嵌入完成");
             Ok(watermarked_samples)
         }
     }
@@ -602,15 +585,11 @@ impl AudioWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         bit_count: usize,
     ) -> Result<Vec<u8>> {
-        println!("🎵 开始混合音频水印提取（标准DCT提取）");
-
         // 无论什么算法，都使用标准提取流程
         // 因为嵌入时虽然用了音频专用算法，但基本的DCT位置是相同的
         let processed_samples = Self::prepare_samples_for_watermarking(samples, algorithm)?;
         let data = Self::audio_to_array(&processed_samples)?;
         let extracted_bits = algorithm.extract(&data, bit_count)?;
-
-        println!("✅ 混合音频水印提取完成");
         Ok(extracted_bits)
     }
 
@@ -623,7 +602,7 @@ impl AudioWatermarker {
             return;
         }
 
-        println!("🔧 应用高级音频平滑处理流水线...");
+        eprintln!("🔧 应用高级音频平滑处理流水线...");
 
         // 第1步：全局动态范围分析与保护性归一化
         let max_abs = watermarked_samples
@@ -635,7 +614,7 @@ impl AudioWatermarker {
             for sample in watermarked_samples.iter_mut() {
                 *sample *= protection_factor;
             }
-            println!("  📊 应用了保护性归一化，因子: {protection_factor:.4}");
+            eprintln!("  📊 应用了保护性归一化，因子: {protection_factor:.4}");
         }
 
         // 第2步：温和的全局低通滤波，减少高频artifacts
@@ -650,7 +629,7 @@ impl AudioWatermarker {
         // 第5步：最终的感知优化限制
         Self::apply_perceptual_limiting(watermarked_samples);
 
-        println!("✅ 高级音频平滑处理完成");
+        eprintln!("✅ 高级音频平滑处理完成");
     }
 
     /// 全局温和低通滤波
@@ -669,7 +648,7 @@ impl AudioWatermarker {
         }
 
         samples.copy_from_slice(&filtered);
-        println!("  🎛️ 应用了全局温和低通滤波");
+        eprintln!("  🎛️ 应用了全局温和低通滤波");
     }
 
     /// 自适应动态范围压缩
@@ -693,7 +672,7 @@ impl AudioWatermarker {
             }
         }
 
-        println!("  🎚️ 应用了自适应动态范围压缩");
+        eprintln!("  🎚️ 应用了自适应动态范围压缩");
     }
 
     /// 边界平滑处理
@@ -713,7 +692,7 @@ impl AudioWatermarker {
             samples[i] *= fade_factor;
         }
 
-        println!("  🎭 应用了边界平滑处理，淡入淡出长度: {fade_length}样本");
+        eprintln!("  🎭 应用了边界平滑处理，淡入淡出长度: {fade_length}样本");
     }
 
     /// 感知优化限制
@@ -729,7 +708,7 @@ impl AudioWatermarker {
             }
         }
 
-        println!("  🔊 应用了感知优化限制");
+        eprintln!("  🔊 应用了感知优化限制");
     }
 
     /// 轻量化的音频后处理 - 专为音频优化DCT设计
@@ -738,8 +717,6 @@ impl AudioWatermarker {
             return;
         }
 
-        println!("🔧 应用轻量化音频后处理...");
-
         // 第1步：保护性限制（很温和）
         let max_abs = samples.iter().map(|&x| x.abs()).fold(0.0f64, f64::max);
         if max_abs > 1.0 {
@@ -747,7 +724,6 @@ impl AudioWatermarker {
             for sample in samples.iter_mut() {
                 *sample *= protection_factor;
             }
-            println!("  📊 应用了保护性归一化，因子: {protection_factor:.4}");
         }
 
         // 第2步：极轻微的平滑处理
@@ -755,8 +731,6 @@ impl AudioWatermarker {
 
         // 第3步：边界柔化（很短的淡入淡出）
         Self::apply_light_boundary_softening(samples);
-
-        println!("✅ 轻量化音频后处理完成");
     }
 
     /// 超轻微的平滑处理
@@ -775,7 +749,6 @@ impl AudioWatermarker {
         }
 
         samples.copy_from_slice(&smoothed);
-        println!("🎛️  应用了超轻微平滑处理");
     }
 
     /// 轻微的边界柔化
@@ -794,7 +767,5 @@ impl AudioWatermarker {
             let fade_factor = ((samples.len() - i) as f64 / fade_length as f64).sqrt();
             samples[i] *= fade_factor;
         }
-
-        println!("🎭 应用了轻微边界柔化，长度: {fade_length}样本");
     }
 }

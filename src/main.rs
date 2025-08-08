@@ -1,6 +1,7 @@
 use clap::Parser;
 use colored::*;
 use seal::prelude::*;
+use serde_json::json;
 use std::process;
 
 fn main() -> Result<()> {
@@ -16,8 +17,24 @@ fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // 记录本次动作类型，便于错误时输出JSON
+    let action_for_error = match &cli.command {
+        Commands::Embed { .. } => "embed",
+        Commands::Extract { .. } => "extract",
+    };
+
     if let Err(e) = run(cli) {
-        eprintln!("{} {}", "错误:".red().bold(), e.to_string().red());
+        // 错误信息：stderr 打印人类可读，stdout 打印单行 JSON 便于机器解析
+        let err_msg = e.to_string();
+        eprintln!("{} {}", "错误:".red().bold(), err_msg.red());
+        println!(
+            "{}",
+            json!({
+                "status": "error",
+                "action": action_for_error,
+                "message": err_msg,
+            })
+        );
         process::exit(1);
     }
     Ok(())
@@ -49,10 +66,11 @@ fn run(cli: Cli) -> Result<()> {
             let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone());
 
             // 根据媒体类型选择处理方式
+            let mut processed_frames_opt: Option<usize> = None;
             match media_type {
                 MediaType::Image => {
                     if cli.verbose {
-                        println!(
+                        eprintln!(
                             "{} {}",
                             "🖼️  处理图片文件:".blue().bold(),
                             format!("{input:?}").cyan()
@@ -64,7 +82,7 @@ fn run(cli: Cli) -> Result<()> {
                             watermark,
                             watermark_algorithm.as_ref(),
                         )? {
-                            println!(
+                            eprintln!(
                                 "{} {}",
                                 "⚠️".yellow(),
                                 "警告: 水印可能太长，可能影响嵌入效果".yellow()
@@ -82,7 +100,7 @@ fn run(cli: Cli) -> Result<()> {
                 }
                 MediaType::Audio => {
                     if cli.verbose {
-                        println!(
+                        eprintln!(
                             "{} {}",
                             "🎧  处理音频文件:".blue().bold(),
                             format!("{input:?}").cyan()
@@ -94,7 +112,7 @@ fn run(cli: Cli) -> Result<()> {
                             watermark,
                             watermark_algorithm.as_ref(),
                         )? {
-                            println!(
+                            eprintln!(
                                 "{} {}",
                                 "⚠️".yellow(),
                                 "警告: 水印可能太长，可能影响嵌入效果".yellow()
@@ -112,7 +130,7 @@ fn run(cli: Cli) -> Result<()> {
                 }
                 MediaType::Video => {
                     if cli.verbose {
-                        println!(
+                        eprintln!(
                             "{} {}",
                             "🎥  处理视频文件:".blue().bold(),
                             format!("{input:?}").cyan()
@@ -124,7 +142,7 @@ fn run(cli: Cli) -> Result<()> {
                             watermark,
                             watermark_algorithm.as_ref(),
                         )? {
-                            println!(
+                            eprintln!(
                                 "{} {}",
                                 "⚠️".yellow(),
                                 "警告: 水印可能太长，可能影响嵌入效果".yellow()
@@ -132,7 +150,7 @@ fn run(cli: Cli) -> Result<()> {
                         }
                     }
 
-                    VideoWatermarker::embed_watermark(
+                    let processed_frames = VideoWatermarker::embed_watermark(
                         input,
                         output,
                         watermark,
@@ -140,12 +158,27 @@ fn run(cli: Cli) -> Result<()> {
                         *strength,
                         *lossless,
                     )?;
+                    processed_frames_opt = Some(processed_frames);
                 }
             }
 
-            if cli.verbose {
-                println!("{} {}", "✅".green(), "水印嵌入完成!".green().bold());
+            // 成功：stdout 打印单行 JSON
+            let mut json_output = json!({
+                "status": "success",
+                "action": "embed",
+                "input": input.display().to_string(),
+                "output": output.display().to_string(),
+                "algorithm": format!("{:?}", algorithm),
+                "media_type": format!("{:?}", media_type),
+                "strength": strength,
+                "lossless": lossless,
+            });
+
+            if let Some(n) = processed_frames_opt {
+                json_output["processed_frames"] = json!(n);
             }
+
+            println!("{}", json_output);
         }
 
         Commands::Extract {
@@ -153,6 +186,8 @@ fn run(cli: Cli) -> Result<()> {
             algorithm,
             length,
             output,
+            sample_frames,
+            confidence_threshold,
         } => {
             // 检查输入文件是否存在
             if !MediaUtils::file_exists(input) {
@@ -169,12 +204,12 @@ fn run(cli: Cli) -> Result<()> {
             let watermark_algorithm = WatermarkFactory::create_algorithm(algorithm.clone());
 
             if cli.verbose {
-                println!(
+                eprintln!(
                     "{} {}",
                     "🔍  从文件提取水印:".blue().bold(),
                     format!("{input:?}").cyan()
                 );
-                println!(
+                eprintln!(
                     "{} {}",
                     "🔧  使用算法:".blue().bold(),
                     format!("{algorithm:?}").cyan()
@@ -184,51 +219,66 @@ fn run(cli: Cli) -> Result<()> {
             let watermark_length = *length;
 
             // 根据媒体类型选择处理方式
-            let extracted_watermark = match media_type {
-                MediaType::Image => ImageWatermarker::extract_watermark(
-                    input,
-                    watermark_algorithm.as_ref(),
-                    watermark_length,
-                )?,
-                MediaType::Audio => AudioWatermarker::extract_watermark(
-                    input,
-                    watermark_algorithm.as_ref(),
-                    watermark_length,
-                )?,
+            let (extracted_watermark, confidence, actual_frames_used) = match media_type {
+                MediaType::Image => {
+                    let watermark = ImageWatermarker::extract_watermark(
+                        input,
+                        watermark_algorithm.as_ref(),
+                        watermark_length,
+                    )?;
+                    (watermark, 1.0, 1) // 图片始终置信度100%，使用1帧
+                }
+                MediaType::Audio => {
+                    let watermark = AudioWatermarker::extract_watermark(
+                        input,
+                        watermark_algorithm.as_ref(),
+                        watermark_length,
+                    )?;
+                    (watermark, 1.0, 1) // 音频始终置信度100%，使用1帧
+                }
                 MediaType::Video => VideoWatermarker::extract_watermark(
                     input,
                     watermark_algorithm.as_ref(),
                     watermark_length,
+                    Some(*sample_frames),
+                    Some(*confidence_threshold),
                 )?,
             };
 
             // 输出到文件（如果指定）
+            let mut saved_to: Option<String> = None;
             if let Some(output_path) = output {
                 MediaUtils::ensure_output_dir(output_path)?;
                 std::fs::write(output_path, &extracted_watermark)?;
-                println!(
+                saved_to = Some(output_path.display().to_string());
+                eprintln!(
                     "{} {}",
                     "💾".green(),
                     format!("提取的水印已保存到: {output_path:?}").green()
                 );
             }
 
-            // 总是在控制台显示结果
-            println!("\n{}", "=== 提取结果 ===".cyan().bold());
-            println!(
-                "{} {}",
-                "📜  水印内容:".blue().bold(),
-                extracted_watermark.green()
-            );
-            println!(
-                "{} {}",
-                "📊  水印长度:".blue().bold(),
-                format!("{} 字符", extracted_watermark.len()).yellow()
-            );
+            // 成功：stdout 打印单行 JSON
+            let mut json_output = json!({
+                "status": "success",
+                "action": "extract",
+                "input": input.display().to_string(),
+                "algorithm": format!("{:?}", algorithm),
+                "media_type": format!("{:?}", media_type),
+                "length": extracted_watermark.len(),
+                "watermark": extracted_watermark,
+                "output": saved_to,
+            });
 
-            if cli.verbose {
-                println!("{} {}", "✅".green(), "水印提取完成!".green().bold());
+            // 对于视频类型，添加额外的质量信息
+            if matches!(media_type, MediaType::Video) {
+                json_output["confidence"] = json!(confidence);
+                json_output["sample_frames_requested"] = json!(sample_frames);
+                json_output["actual_frames_used"] = json!(actual_frames_used);
+                json_output["confidence_threshold"] = json!(confidence_threshold);
             }
+
+            println!("{}", json_output);
         }
     }
 

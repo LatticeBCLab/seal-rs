@@ -9,7 +9,7 @@ use std::path::Path;
 pub struct VideoWatermarker;
 
 impl VideoWatermarker {
-    /// 嵌入水印到视频
+    /// 嵌入水印到视频，返回处理的帧总数
     pub fn embed_watermark<P: AsRef<Path>>(
         input_path: P,
         output_path: P,
@@ -17,7 +17,7 @@ impl VideoWatermarker {
         algorithm: &dyn WatermarkAlgorithm,
         strength: f64,
         lossless: bool,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let input_path = input_path.as_ref();
         let output_path = output_path.as_ref();
 
@@ -58,7 +58,7 @@ impl VideoWatermarker {
         progress.inc(1);
 
         // 处理每一帧，添加水印
-        progress.set_message("🎯  处理视频帧 (添加水印)".to_string());
+        progress.set_message("🎯  处理视频帧".to_string());
         let frame_files = Self::get_frame_files(&frames_dir)?;
 
         // 创建帧处理进度条
@@ -66,7 +66,7 @@ impl VideoWatermarker {
         frame_progress.set_style(
             ProgressStyle::default_bar()
                 .template(
-                    "   {spinner:.green} [{elapsed_precise}] [{bar:30.yellow/red}] {pos}/{len} 帧",
+                    "{spinner:.green} [{elapsed_precise}] [{bar:30.yellow/red}] {pos}/{len} 帧",
                 )
                 .unwrap()
                 .progress_chars("█▉▊▋▌▍▎▏  "),
@@ -93,21 +93,26 @@ impl VideoWatermarker {
 
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
-        println!("{} {}", "🧹".blue(), "临时文件已清理".blue());
+        eprintln!("{} {}", "🧹".blue(), "临时文件已清理".blue());
 
-        Ok(())
+        Ok(frame_files.len())
     }
 
-    /// 从视频中提取水印
+    /// 从视频中提取水印（多帧投票增强版本）
     pub fn extract_watermark<P: AsRef<Path>>(
         input_path: P,
         algorithm: &dyn WatermarkAlgorithm,
         watermark_length: usize,
-    ) -> Result<String> {
+        sample_frames: Option<usize>,
+        confidence_threshold: Option<f64>,
+    ) -> Result<(String, f64, usize)> {
         let input_path = input_path.as_ref();
+        // 采样帧数：优先按视频实际帧数限制
+        let sample_frames = sample_frames.unwrap_or(7);
+        let confidence_threshold = confidence_threshold.unwrap_or(0.6); // 默认置信度阈值60%
 
         // 创建提取进度条
-        let progress = ProgressBar::new(3);
+        let progress = ProgressBar::new(4);
         progress.set_style(
             ProgressStyle::default_bar()
                 .template(
@@ -123,26 +128,51 @@ impl VideoWatermarker {
         std::fs::create_dir_all(&temp_dir)?;
         progress.inc(1);
 
-        // 提取样本帧进行水印提取
-        progress.set_message("🎬  提取样本帧".to_string());
-        let sample_frame = temp_dir.join("sample_frame.png");
-        Self::extract_single_frame(input_path, &sample_frame, 1)?;
+        // 获取视频信息
+        progress.set_message("📊  分析视频信息".to_string());
+        let _video_info = Self::get_video_info(input_path)?;
         progress.inc(1);
 
-        // 使用图片水印提取算法
-        progress.set_message("🔍  分析水印数据".to_string());
-        use crate::media::ImageWatermarker;
-        let watermark =
-            ImageWatermarker::extract_watermark(&sample_frame, algorithm, watermark_length)?;
+        // 多帧采样提取
+        progress.set_message(format!("🎬  提取{}个样本帧", sample_frames));
+        let frame_results = Self::extract_multiple_frames_watermark(
+            input_path,
+            &temp_dir,
+            algorithm,
+            watermark_length,
+            sample_frames,
+        )?;
+        let actual_frames_used = frame_results.len();
+        progress.inc(1);
+
+        // 投票机制确定最终结果
+        progress.set_message("🗳️  多帧投票分析".to_string());
+        let (final_watermark, confidence) =
+            Self::vote_watermark_bits(frame_results, watermark_length);
+
+        // 检查置信度
+        if confidence < confidence_threshold {
+            eprintln!(
+                "{} 警告：提取置信度较低 ({:.1}%)，建议检查视频质量或增加采样帧数",
+                "⚠️".yellow(),
+                confidence * 100.0
+            );
+        }
+
         progress.inc(1);
 
         // 完成提取
-        progress.finish_with_message("🎉 视频水印提取完成!".green().bold().to_string());
+        progress.finish_with_message(
+            format!("🎉 视频水印提取完成! 置信度: {:.1}%", confidence * 100.0)
+                .green()
+                .bold()
+                .to_string(),
+        );
 
         // 清理临时文件
         std::fs::remove_dir_all(&temp_dir)?;
 
-        Ok(watermark)
+        Ok((final_watermark, confidence, actual_frames_used))
     }
 
     /// 检查水印容量
@@ -291,6 +321,122 @@ impl VideoWatermarker {
         Ok(())
     }
 
+    /// 多帧采样提取水印
+    fn extract_multiple_frames_watermark<P: AsRef<Path>>(
+        input_path: P,
+        temp_dir: &Path,
+        algorithm: &dyn WatermarkAlgorithm,
+        watermark_length: usize,
+        sample_frames: usize,
+    ) -> Result<Vec<(Vec<u8>, f64)>> {
+        let mut results = Vec::new();
+        use crate::media::ImageWatermarker;
+
+        // 生成采样帧位置：跳过前5%帧，在剩余帧中均匀采样
+        let skip_frames = 5; // 跳过前5帧避免编码问题
+        let mut frame_indices = Self::generate_sample_frame_indices(
+            sample_frames,
+            skip_frames,
+            skip_frames + sample_frames,
+        );
+        frame_indices.sort_unstable();
+        frame_indices.dedup();
+        // 控制最终抽样数量不超过请求值
+        if frame_indices.len() > sample_frames {
+            frame_indices.truncate(sample_frames);
+        }
+
+        for (i, &frame_idx) in frame_indices.iter().enumerate() {
+            let frame_path = temp_dir.join(format!("sample_frame_{}.png", i));
+
+            // 提取帧
+            match Self::extract_single_frame(input_path.as_ref(), &frame_path, frame_idx as u32) {
+                Ok(_) => {
+                    // 确保帧文件真实生成
+                    if !frame_path.exists() {
+                        continue;
+                    }
+                    if let Ok(meta) = frame_path.metadata() {
+                        if meta.len() == 0 {
+                            let _ = std::fs::remove_file(&frame_path);
+                            continue;
+                        }
+                    }
+                    // 计算帧质量
+                    let quality = match Self::assess_frame_quality(&frame_path) {
+                        Ok(q) => q,
+                        Err(_) => {
+                            // 质量评估失败则跳过此帧
+                            let _ = std::fs::remove_file(&frame_path);
+                            continue;
+                        }
+                    };
+
+                    // 提取水印
+                    match ImageWatermarker::extract_watermark(
+                        &frame_path,
+                        algorithm,
+                        watermark_length,
+                    ) {
+                        Ok(watermark_text) => {
+                            // 将字符串转换为比特数组进行投票
+                            let bits = Self::string_to_bits(&watermark_text, watermark_length);
+                            results.push((bits, quality));
+                        }
+                        Err(_) => {
+                            // 提取失败，跳过这一帧
+                            let _ = std::fs::remove_file(&frame_path);
+                            continue;
+                        }
+                    }
+                }
+                Err(_) => {
+                    // 帧提取失败，跳过
+                    continue;
+                }
+            }
+        }
+
+        if results.is_empty() {
+            return Err(WatermarkError::ProcessingError(
+                "所有采样帧的水印提取都失败".to_string(),
+            ));
+        }
+
+        Ok(results)
+    }
+
+    /// 生成采样帧索引
+    fn generate_sample_frame_indices(
+        sample_count: usize,
+        skip_frames: usize,
+        max_frames: usize,
+    ) -> Vec<usize> {
+        if sample_count == 0 {
+            return vec![];
+        }
+
+        let available_frames = max_frames.saturating_sub(skip_frames);
+        if available_frames == 0 {
+            return vec![skip_frames];
+        }
+
+        let mut indices = Vec::new();
+
+        if sample_count == 1 {
+            // 单帧情况，选择中间帧
+            indices.push(skip_frames + available_frames / 2);
+        } else {
+            // 多帧情况，均匀分布
+            for i in 0..sample_count {
+                let frame_idx = skip_frames + (i * available_frames) / (sample_count - 1);
+                indices.push(frame_idx.min(max_frames - 1));
+            }
+        }
+
+        indices
+    }
+
     /// 获取帧文件列表
     fn get_frame_files<P: AsRef<Path>>(frames_dir: P) -> Result<Vec<std::path::PathBuf>> {
         let mut frame_files = Vec::new();
@@ -320,19 +466,170 @@ impl VideoWatermarker {
         let temp_output = frame_path.as_ref().with_extension("tmp.png");
 
         // 使用静默模式的图片水印算法处理帧（不打印日志）
-        ImageWatermarker::embed_watermark_with_options(
+        ImageWatermarker::embed_watermark(
             frame_path.as_ref(),
             &temp_output,
             watermark_text,
             algorithm,
             strength,
-            true, // silent = true，不打印日志
         )?;
 
         // 替换原文件
         std::fs::rename(temp_output, frame_path)?;
 
         Ok(())
+    }
+
+    /// 帧质量评估（基于图像方差和清晰度）
+    fn assess_frame_quality<P: AsRef<Path>>(frame_path: P) -> Result<f64> {
+        use image::io::Reader as ImageReader;
+
+        // 读取图像
+        let img = ImageReader::open(frame_path.as_ref())
+            .map_err(|e| WatermarkError::ProcessingError(format!("无法读取图像: {}", e)))?
+            .decode()
+            .map_err(|e| WatermarkError::ProcessingError(format!("无法解码图像: {}", e)))?;
+
+        let gray = img.to_luma8();
+        let (width, height) = gray.dimensions();
+
+        // 计算图像方差（反映对比度）
+        let mut sum = 0u64;
+        let mut sum_sq = 0u64;
+        let pixel_count = (width * height) as u64;
+
+        for pixel in gray.as_raw() {
+            let val = *pixel as u64;
+            sum += val;
+            sum_sq += val * val;
+        }
+
+        let mean = sum as f64 / pixel_count as f64;
+        let variance = (sum_sq as f64 / pixel_count as f64) - (mean * mean);
+
+        // 计算简单的清晰度指标（梯度幅度）
+        let mut gradient_sum = 0f64;
+        let gray_data = gray.as_raw();
+
+        for y in 1..height.saturating_sub(1) {
+            for x in 1..width.saturating_sub(1) {
+                let idx = (y * width + x) as usize;
+                let dx = gray_data[idx + 1] as f64 - gray_data[idx - 1] as f64;
+                let dy =
+                    gray_data[idx + width as usize] as f64 - gray_data[idx - width as usize] as f64;
+                gradient_sum += (dx * dx + dy * dy).sqrt();
+            }
+        }
+
+        let sharpness = gradient_sum / ((width - 2) * (height - 2)) as f64;
+
+        // 综合质量分数（方差权重70%，清晰度权重30%）
+        let quality = variance * 0.7 + sharpness * 0.3;
+
+        Ok(quality)
+    }
+
+    /// 投票机制确定最终水印
+    fn vote_watermark_bits(results: Vec<(Vec<u8>, f64)>, expected_length: usize) -> (String, f64) {
+        if results.is_empty() {
+            return (String::new(), 0.0);
+        }
+
+        let mut bit_votes = vec![Vec::new(); expected_length * 8]; // 每个字符8位
+
+        // 收集所有帧的投票（按质量加权）
+        for (bits, quality) in &results {
+            for (i, &bit) in bits.iter().enumerate() {
+                if i < bit_votes.len() {
+                    bit_votes[i].push((bit, *quality));
+                }
+            }
+        }
+
+        // 对每个比特位进行加权投票
+        let mut final_bits = Vec::new();
+        let mut confidence_sum = 0.0;
+
+        for votes in bit_votes {
+            if votes.is_empty() {
+                final_bits.push(0);
+                continue;
+            }
+
+            let mut weight_0 = 0.0;
+            let mut weight_1 = 0.0;
+            let total_weight: f64 = votes.iter().map(|(_, w)| w).sum();
+
+            for (bit, weight) in votes {
+                if bit == 0 {
+                    weight_0 += weight;
+                } else {
+                    weight_1 += weight;
+                }
+            }
+
+            let winning_bit = if weight_1 > weight_0 { 1 } else { 0 };
+            final_bits.push(winning_bit);
+
+            // 计算置信度（获胜方的权重占比）
+            let bit_confidence = weight_1.max(weight_0) / total_weight;
+            confidence_sum += bit_confidence;
+        }
+
+        let overall_confidence = if final_bits.is_empty() {
+            0.0
+        } else {
+            confidence_sum / final_bits.len() as f64
+        };
+
+        // 将比特转换回字符串
+        let watermark_text = Self::bits_to_string(&final_bits, expected_length);
+
+        (watermark_text, overall_confidence)
+    }
+
+    /// 字符串转比特数组
+    fn string_to_bits(text: &str, expected_length: usize) -> Vec<u8> {
+        let mut bits = Vec::new();
+        let bytes = text.as_bytes();
+
+        for i in 0..expected_length {
+            let byte = if i < bytes.len() { bytes[i] } else { 0 };
+
+            // 将每个字节转换为8个比特
+            for bit_pos in 0..8 {
+                let bit = (byte >> (7 - bit_pos)) & 1;
+                bits.push(bit);
+            }
+        }
+
+        bits
+    }
+
+    /// 比特数组转字符串
+    fn bits_to_string(bits: &[u8], expected_length: usize) -> String {
+        let mut bytes = Vec::new();
+
+        // 每8个比特组成一个字节
+        for chunk in bits.chunks(8) {
+            let mut byte = 0u8;
+            for (i, &bit) in chunk.iter().enumerate() {
+                if bit != 0 {
+                    byte |= 1 << (7 - i);
+                }
+            }
+            bytes.push(byte);
+        }
+
+        // 截断到期望长度并转换为字符串
+        bytes.truncate(expected_length);
+
+        // 找到第一个null字符的位置
+        if let Some(null_pos) = bytes.iter().position(|&b| b == 0) {
+            bytes.truncate(null_pos);
+        }
+
+        String::from_utf8_lossy(&bytes).to_string()
     }
 
     /// 重新组合视频
