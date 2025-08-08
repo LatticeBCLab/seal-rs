@@ -28,8 +28,8 @@ jobs:
             asset_name: seal-linux-x86_64-musl
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: seal-windows-x86_64.exe
-            asset_name: seal-windows-x86_64.exe
+            artifact_name: seal-windows-x86_64
+            asset_name: seal-windows-x86_64
           #- os: macos-latest
           #  target: x86_64-apple-darwin
           #  artifact_name: seal-macos-x86_64
@@ -140,7 +140,7 @@ jobs:
         # copy binaries
         cp target/${{ matrix.target }}/release/seal "$BUNDLE_DIR/" || true
         if [ -f target/${{ matrix.target }}/release/ffmpeg ]; then cp target/${{ matrix.target }}/release/ffmpeg "$BUNDLE_DIR/"; fi
-        if [ -f target/${{ matrix.target }}/release/ffprobe ]; then cp target/${{ matrix.target }}/release/ffprobe "$BUNDLE_DIR/"; fi
+        # if [ -f target/${{ matrix.target }}/release/ffprobe ]; then cp target/${{ matrix.target }}/release/ffprobe "$BUNDLE_DIR/"; fi
         # strip main binary if available
         strip "$BUNDLE_DIR/seal" || true
         # archive
@@ -157,7 +157,7 @@ jobs:
         New-Item -ItemType Directory -Path $bundle | Out-Null
         Copy-Item target\${{ matrix.target }}\release\seal.exe (Join-Path $bundle 'seal.exe') -Force
         if (Test-Path target\${{ matrix.target }}\release\ffmpeg.exe) { Copy-Item target\${{ matrix.target }}\release\ffmpeg.exe (Join-Path $bundle 'ffmpeg.exe') -Force }
-        if (Test-Path target\${{ matrix.target }}\release\ffprobe.exe) { Copy-Item target\${{ matrix.target }}\release\ffprobe.exe (Join-Path $bundle 'ffprobe.exe') -Force }
+        # if (Test-Path target\${{ matrix.target }}\release\ffprobe.exe) { Copy-Item target\${{ matrix.target }}\release\ffprobe.exe (Join-Path $bundle 'ffprobe.exe') -Force }
         $zip = "${{ matrix.asset_name }}.zip"
         if (Test-Path $zip) { Remove-Item $zip }
         Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $zip
