@@ -18,26 +18,26 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: seal-linux-x86_64
-            asset_name: seal-linux-x86_64
+          #- os: ubuntu-latest
+          #  target: x86_64-unknown-linux-gnu
+          #  artifact_name: seal-linux-x86_64
+          #  asset_name: seal-linux-x86_64
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             artifact_name: seal-linux-x86_64-musl
             asset_name: seal-linux-x86_64-musl
-          #- os: windows-latest
-          #  target: x86_64-pc-windows-msvc
-          #  artifact_name: seal-windows-x86_64.exe
-          #  asset_name: seal-windows-x86_64.exe
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: seal-windows-x86_64.exe
+            asset_name: seal-windows-x86_64.exe
           #- os: macos-latest
           #  target: x86_64-apple-darwin
           #  artifact_name: seal-macos-x86_64
           #  asset_name: seal-macos-x86_64
-          #- os: macos-latest
-          #  target: aarch64-apple-darwin
-          #  artifact_name: seal-macos-arm64
-          #  asset_name: seal-macos-arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: seal-macos-arm64
+            asset_name: seal-macos-arm64
 
     steps:
     - name: Checkout code
@@ -70,6 +70,61 @@ jobs:
     - name: Build
       run: |
         cargo build --release --target ${{ matrix.target }}
+
+    - name: Download ffmpeg for Linux (musl/x86_64)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        set -e
+        sudo apt-get update
+        sudo apt-get install -y xz-utils tar curl
+        FF_DIR=$(mktemp -d)
+        URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+        echo "Downloading $URL"
+        curl -L -o "$FF_DIR/ffmpeg.tar.xz" "$URL"
+        tar -xf "$FF_DIR/ffmpeg.tar.xz" -C "$FF_DIR"
+        # Get the first directory in the unzip result
+        INNER=$(find "$FF_DIR" -maxdepth 1 -type d -name "ffmpeg-*-amd64-static" | head -n1)
+        if [ -z "$INNER" ]; then echo "Cannot locate unpacked ffmpeg dir"; exit 1; fi
+        mkdir -p target/${{ matrix.target }}/release
+        cp "$INNER/ffmpeg" target/${{ matrix.target }}/release/ffmpeg || true
+        cp "$INNER/ffprobe" target/${{ matrix.target }}/release/ffprobe || true
+        ls -l target/${{ matrix.target }}/release/
+
+    - name: Download ffmpeg for macOS (aarch64)
+      if: matrix.os == 'macos-latest'
+      run: |
+        set -e
+        FF_DIR=$(mktemp -d)
+        URL="https://www.osxexperts.net/ffmpeg7arm.zip"
+        echo "Downloading $URL"
+        curl -L -o "$FF_DIR/ffmpeg.zip" "$URL"
+        unzip -q "$FF_DIR/ffmpeg.zip" -d "$FF_DIR"
+        # Try to find ffmpeg executable in the unzip result
+        CAND=$(find "$FF_DIR" -type f -name "ffmpeg" | head -n1)
+        if [ -z "$CAND" ]; then echo "Cannot locate ffmpeg binary in zip"; exit 1; fi
+        mkdir -p target/${{ matrix.target }}/release
+        cp "$CAND" target/${{ matrix.target }}/release/ffmpeg || true
+        # Some mac packages don't include ffprobe
+        CAND_PROBE=$(find "$FF_DIR" -type f -name "ffprobe" | head -n1)
+        if [ -n "$CAND_PROBE" ]; then cp "$CAND_PROBE" target/${{ matrix.target }}/release/ffprobe || true; fi
+        ls -l target/${{ matrix.target }}/release/
+
+    - name: Download ffmpeg for Windows (x86_64)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $url = 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip'
+        $ffdir = New-Item -ItemType Directory -Path ([System.IO.Path]::GetTempPath()) -Name (New-Guid).Guid
+        $zip = Join-Path $ffdir 'ffmpeg.zip'
+        Invoke-WebRequest -Uri $url -OutFile $zip
+        Expand-Archive -Path $zip -DestinationPath $ffdir
+        $inner = Get-ChildItem -Path $ffdir -Directory | Where-Object { $_.Name -like 'ffmpeg-*' } | Select-Object -First 1
+        if (-not $inner) { throw 'Cannot locate unpacked ffmpeg dir' }
+        New-Item -ItemType Directory -Force -Path "target/${{ matrix.target }}/release" | Out-Null
+        Copy-Item -Path (Join-Path $inner.FullName 'bin/ffmpeg.exe') -Destination "target/${{ matrix.target }}/release/ffmpeg.exe" -Force
+        Copy-Item -Path (Join-Path $inner.FullName 'bin/ffprobe.exe') -Destination "target/${{ matrix.target }}/release/ffprobe.exe" -Force
+        Get-ChildItem "target/${{ matrix.target }}/release"
 
     - name: Run tests
       if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'x86_64-pc-windows-msvc' || matrix.target == 'x86_64-apple-darwin'
