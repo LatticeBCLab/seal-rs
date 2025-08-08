@@ -131,82 +131,46 @@ jobs:
       run: |
         cargo test --target ${{ matrix.target }}
 
-    - name: Prepare artifact (Unix)
+    - name: Package artifact (Linux/macOS)
       if: matrix.os != 'windows-latest'
       run: |
-        cp target/${{ matrix.target }}/release/seal ${{ matrix.artifact_name }}
-        strip ${{ matrix.artifact_name }} || true
+        set -e
+        BUNDLE_DIR=bundle
+        rm -rf "$BUNDLE_DIR" && mkdir -p "$BUNDLE_DIR"
+        # copy binaries
+        cp target/${{ matrix.target }}/release/seal "$BUNDLE_DIR/" || true
+        if [ -f target/${{ matrix.target }}/release/ffmpeg ]; then cp target/${{ matrix.target }}/release/ffmpeg "$BUNDLE_DIR/"; fi
+        if [ -f target/${{ matrix.target }}/release/ffprobe ]; then cp target/${{ matrix.target }}/release/ffprobe "$BUNDLE_DIR/"; fi
+        # strip main binary if available
+        strip "$BUNDLE_DIR/seal" || true
+        # archive
+        tar -C "$BUNDLE_DIR" -czf ${{ matrix.asset_name }}.tar.gz .
+        ls -la ${{ matrix.asset_name }}.tar.gz
 
-    - name: Prepare artifact (Windows)
+    - name: Package artifact (Windows)
       if: matrix.os == 'windows-latest'
+      shell: pwsh
       run: |
-        copy target\${{ matrix.target }}\release\seal.exe ${{ matrix.artifact_name }}
+        $ErrorActionPreference = 'Stop'
+        $bundle = Join-Path (Get-Location) 'bundle'
+        if (Test-Path $bundle) { Remove-Item -Recurse -Force $bundle }
+        New-Item -ItemType Directory -Path $bundle | Out-Null
+        Copy-Item target\${{ matrix.target }}\release\seal.exe (Join-Path $bundle 'seal.exe') -Force
+        if (Test-Path target\${{ matrix.target }}\release\ffmpeg.exe) { Copy-Item target\${{ matrix.target }}\release\ffmpeg.exe (Join-Path $bundle 'ffmpeg.exe') -Force }
+        if (Test-Path target\${{ matrix.target }}\release\ffprobe.exe) { Copy-Item target\${{ matrix.target }}\release\ffprobe.exe (Join-Path $bundle 'ffprobe.exe') -Force }
+        $zip = "${{ matrix.asset_name }}.zip"
+        if (Test-Path $zip) { Remove-Item $zip }
+        Compress-Archive -Path (Join-Path $bundle '*') -DestinationPath $zip
+        Get-ChildItem $zip
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.artifact_name }}
-        path: ${{ matrix.artifact_name }}
-        retention-days: 30
-
-  create-checksums:
-    name: Create checksums
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    
-    steps:
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-
-    - name: Create checksums
-      run: |
-        cd artifacts
-        find . -type f -exec sha256sum {} \; > ../checksums.txt
-        cat ../checksums.txt
-
-    - name: Upload checksums
-      uses: actions/upload-artifact@v4
-      with:
-        name: checksums
-        path: checksums.txt
-
-  release:
-    name: Create Release
-    needs: [build, create-checksums]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    
-    permissions:
-      contents: write
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-
-    - name: Prepare release assets
-      run: |
-        mkdir -p release
-        find artifacts -type f -name "seal-*" -exec cp {} release/ \;
-        cp artifacts/checksums/checksums.txt release/
-        ls -la release/
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        files: release/*
-        draft: false
-        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-        generate_release_notes: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        name: ${{ matrix.asset_name }}
+        path: |
+          ${{ matrix.asset_name }}.tar.gz
+          ${{ matrix.asset_name }}.zip
+        retention-days: 60
 
   check:
     name: Check code quality
