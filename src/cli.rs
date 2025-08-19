@@ -40,6 +40,10 @@ pub enum Commands {
         /// 是否使用无损压缩（仅对视频有效）
         #[arg(long)]
         lossless: bool,
+
+        /// 视频水印处理模式（仅对视频文件有效）
+        #[arg(long, default_value = "video")]
+        video_mode: VideoWatermarkMode,
     },
     /// 提取水印
     Extract {
@@ -66,6 +70,10 @@ pub enum Commands {
         /// 置信度阈值（仅对视频有效，0.0-1.0，默认0.6）
         #[arg(long, default_value = "0.6")]
         confidence_threshold: f64,
+
+        /// 视频水印处理模式（仅对视频文件有效）
+        #[arg(long, default_value = "video")]
+        video_mode: VideoWatermarkMode,
     },
 }
 
@@ -74,4 +82,15 @@ pub enum Commands {
 pub enum Algorithm {
     /// 离散余弦变换
     Dct,
+}
+
+/// 视频水印处理模式
+#[derive(ValueEnum, Clone, Debug)]
+pub enum VideoWatermarkMode {
+    /// 仅处理视频帧
+    Video,
+    /// 仅处理音频轨道
+    Audio,
+    /// 同时处理视频和音频
+    Both,
 }

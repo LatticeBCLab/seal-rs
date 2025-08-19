@@ -49,6 +49,7 @@ fn run(cli: Cli) -> Result<()> {
             algorithm,
             strength,
             lossless,
+            video_mode,
         } => {
             if !MediaUtils::file_exists(input) {
                 return Err(WatermarkError::Io(std::io::Error::new(
@@ -157,6 +158,7 @@ fn run(cli: Cli) -> Result<()> {
                         watermark_algorithm.as_ref(),
                         *strength,
                         *lossless,
+                        video_mode.clone(),
                     )?;
                     processed_frames_opt = Some(processed_frames);
                 }
@@ -174,6 +176,11 @@ fn run(cli: Cli) -> Result<()> {
                 "lossless": lossless,
             });
 
+            // 对于视频类型，添加 video_mode 信息
+            if matches!(media_type, MediaType::Video) {
+                json_output["video_mode"] = json!(format!("{:?}", video_mode));
+            }
+
             if let Some(n) = processed_frames_opt {
                 json_output["processed_frames"] = json!(n);
             }
@@ -188,6 +195,7 @@ fn run(cli: Cli) -> Result<()> {
             output,
             sample_frames,
             confidence_threshold,
+            video_mode,
         } => {
             // 检查输入文件是否存在
             if !MediaUtils::file_exists(input) {
@@ -242,6 +250,7 @@ fn run(cli: Cli) -> Result<()> {
                     watermark_length,
                     Some(*sample_frames),
                     Some(*confidence_threshold),
+                    video_mode.clone(),
                 )?,
             };
 
@@ -270,12 +279,13 @@ fn run(cli: Cli) -> Result<()> {
                 "output": saved_to,
             });
 
-            // 对于视频类型，添加额外的质量信息
+            // 对于视频类型，添加额外的质量信息和 video_mode
             if matches!(media_type, MediaType::Video) {
                 json_output["confidence"] = json!(confidence);
                 json_output["sample_frames_requested"] = json!(sample_frames);
                 json_output["actual_frames_used"] = json!(actual_frames_used);
                 json_output["confidence_threshold"] = json!(confidence_threshold);
+                json_output["video_mode"] = json!(format!("{:?}", video_mode));
             }
 
             println!("{}", json_output);

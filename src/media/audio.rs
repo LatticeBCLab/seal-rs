@@ -246,16 +246,10 @@ impl AudioWatermarker {
         // 添加容错机制，参考图片处理的做法
         let watermark_text = match WatermarkUtils::bits_to_string(&extracted_bits) {
             Ok(text) => {
-                eprintln!("🎵 音频水印提取完成:");
-                eprintln!("使用算法: {}", algorithm.name());
-                eprintln!("提取到的水印: {}", text);
                 text
             }
             Err(_) => {
                 let lossy_text = WatermarkUtils::bits_to_string_lossy(&extracted_bits);
-                eprintln!("🎵 音频水印提取完成 (宽松模式):");
-                eprintln!("使用算法: {}", algorithm.name());
-                eprintln!("提取到的水印: {}", lossy_text);
                 lossy_text
             }
         };
