@@ -199,13 +199,9 @@ impl VideoWatermarker {
         result
     }
 
-    /// 获取视频信息
+    /// # Get video info
     fn get_video_info<P: AsRef<Path>>(input_path: P) -> Result<VideoInfo> {
-        // 使用ffmpeg来检查文件流信息
-        // 我们可以通过尝试提取音频来判断是否有音频轨道
-
-        // 先检查是否是有效的视频文件
-        // 尝试提取第一帧
+        // Try to extract the first frame
         let temp_dir = std::env::temp_dir().join(format!("video_info_{}", std::process::id()));
         std::fs::create_dir_all(&temp_dir)?;
 
@@ -228,7 +224,7 @@ impl VideoWatermarker {
             ));
         }
 
-        // 检查是否有音频：尝试提取音频
+        // Check if there is audio: try to extract audio
         let test_audio = temp_dir.join("test_audio.wav");
         let mut child = FfmpegCommand::new()
             .input(input_path.as_ref().to_str().unwrap())
@@ -243,7 +239,7 @@ impl VideoWatermarker {
         let has_audio =
             audio_status.success() && test_audio.exists() && test_audio.metadata()?.len() > 0;
 
-        // 清理临时文件
+        // Remove temp dir
         std::fs::remove_dir_all(&temp_dir)?;
 
         Ok(VideoInfo {
@@ -254,21 +250,28 @@ impl VideoWatermarker {
         })
     }
 
-    /// 提取音频
+    /// # Extract audio from video
     fn extract_audio<P: AsRef<Path>>(input_path: P, output_path: P) -> Result<()> {
+        let input_str = input_path.as_ref().to_str()
+            .ok_or_else(|| WatermarkError::ProcessingError("输入路径包含无效字符".to_string()))?;
+        let output_str = output_path.as_ref().to_str()
+            .ok_or_else(|| WatermarkError::ProcessingError("输出路径包含无效字符".to_string()))?;
+
         let mut child = FfmpegCommand::new()
-            .input(input_path.as_ref().to_str().unwrap())
-            .args(["-vn"]) // 不包含视频
-            .args(["-acodec", "copy"])
-            .args(["-y"]) // 覆盖输出文件
-            .output(output_path.as_ref().to_str().unwrap())
+            .input(input_str)
+            .args(["-vn"]) // Do not include video
+            .args(["-acodec", "aac", "-b:a", "128k"]) // Force to convert to aac format, specify bitrate
+            .args(["-y"]) // Overwrite output file
+            .output(output_str)
             .spawn()
             .map_err(WatermarkError::Io)?;
 
         let status = child.wait().map_err(WatermarkError::Io)?;
 
         if !status.success() {
-            return Err(WatermarkError::ProcessingError("音频提取失败".to_string()));
+            return Err(WatermarkError::ProcessingError(
+                format!("音频提取失败: FFmpeg 命令执行失败, 错误码: {}", status.code().unwrap_or(-1))
+            ));
         }
 
         Ok(())

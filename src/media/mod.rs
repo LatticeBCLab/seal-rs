@@ -32,7 +32,7 @@ impl MediaUtils {
 
         match extension.as_str() {
             "jpg" | "jpeg" | "png" | "bmp" | "gif" | "tiff" | "webp" => Ok(MediaType::Image),
-            "wav" | "wave" => Ok(MediaType::Audio),
+            "wav" | "wave" | "mp3" | "aac" => Ok(MediaType::Audio),
             "mp4" | "avi" | "mov" | "mkv" => Ok(MediaType::Video),
             _ => Err(WatermarkError::UnsupportedFormat(format!(
                 "不支持的文件格式: {extension}"

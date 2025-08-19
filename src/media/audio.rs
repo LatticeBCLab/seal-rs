@@ -138,26 +138,66 @@ impl AudioWatermarker {
         Ok(prepared_samples)
     }
 
-    /// 转换回原始格式
+    /// 转换回目标格式
     fn convert_to_original_format<P: AsRef<Path>>(
         watermarked_path: P,
         _original_path: P,
         output_path: P,
     ) -> Result<()> {
-        // 直接复制水印音频，保持WAV格式
+        let output_ext = output_path
+            .as_ref()
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+
         let mut command = FfmpegCommand::new();
+        command.input(watermarked_path.as_ref().to_str().unwrap());
+
+        // 根据输出文件扩展名选择合适的编码参数
+        match output_ext.as_str() {
+            "wav" | "wave" => {
+                // WAV: 保持无损PCM格式
+                command.args(["-acodec", "pcm_s16le"]);
+            }
+            "mp3" => {
+                // MP3: 使用较高质量设置以减少水印损失
+                command
+                    .args(["-acodec", "libmp3lame"])
+                    .args(["-b:a", "320k"]) // 最高常用比特率
+                    .args(["-ac", "1"]) // 单声道（与嵌入时一致）
+                    .args(["-ar", "44100"]); // 44.1kHz（与嵌入时一致）
+            }
+            "aac" | "m4a" => {
+                // AAC: 使用较高质量设置
+                command
+                    .args(["-acodec", "aac"])
+                    .args(["-b:a", "320k"]) // 高比特率
+                    .args(["-ac", "1"]) // 单声道
+                    .args(["-ar", "44100"]); // 44.1kHz
+            }
+            "flac" => {
+                // FLAC: 无损压缩
+                command.args(["-acodec", "flac"]);
+            }
+            _ => {
+                // 其他格式: 让ffmpeg自动选择合适的编码器
+                eprintln!("⚠️ 未知音频格式 '{}', 使用默认编码", output_ext);
+            }
+        }
+
         command
-            .input(watermarked_path.as_ref().to_str().unwrap())
-            .args(["-y"])
+            .args(["-y"]) // 覆盖输出文件
             .output(output_path.as_ref().to_str().unwrap());
 
         let mut child = command.spawn().map_err(WatermarkError::Io)?;
         let status = child.wait().map_err(WatermarkError::Io)?;
 
         if !status.success() {
-            return Err(WatermarkError::ProcessingError(
-                "音频格式转换失败".to_string(),
-            ));
+            return Err(WatermarkError::ProcessingError(format!(
+                "音频格式转换失败 (目标格式: {})",
+                output_ext
+            )));
         }
 
         Ok(())
@@ -203,11 +243,25 @@ impl AudioWatermarker {
         // 使用相同的音频专用DCT提取
         let extracted_bits = Self::ultra_gentle_extract(&samples, algorithm, watermark_length * 8)?;
 
-        // 转换为字符串
-        let watermark_text = WatermarkUtils::bits_to_string(&extracted_bits)?;
+        // 添加容错机制，参考图片处理的做法
+        let watermark_text = match WatermarkUtils::bits_to_string(&extracted_bits) {
+            Ok(text) => {
+                eprintln!("🎵 音频水印提取完成:");
+                eprintln!("使用算法: {}", algorithm.name());
+                eprintln!("提取到的水印: {}", text);
+                text
+            }
+            Err(_) => {
+                let lossy_text = WatermarkUtils::bits_to_string_lossy(&extracted_bits);
+                eprintln!("🎵 音频水印提取完成 (宽松模式):");
+                eprintln!("使用算法: {}", algorithm.name());
+                eprintln!("提取到的水印: {}", lossy_text);
+                lossy_text
+            }
+        };
 
         // 清理临时文件
-        std::fs::remove_dir_all(&temp_dir)?;
+        let _ = std::fs::remove_dir_all(&temp_dir); // 使用 let _ 避免清理失败影响结果
 
         Ok(watermark_text)
     }
