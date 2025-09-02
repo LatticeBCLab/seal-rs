@@ -631,7 +631,7 @@ impl VideoWatermarker {
         progress.inc(1);
 
         // 提取音频轨道（如果存在）
-        let audio_path = temp_dir.join("audio.aac");
+        let audio_path = temp_dir.join("audio.wav");
         if video_info.has_audio {
             progress.set_message("🎵  提取音频轨道".to_string());
             Self::extract_audio(input_path, &audio_path)?;

@@ -246,9 +246,7 @@ impl AudioWatermarker {
         // 添加容错机制，参考图片处理的做法
         let watermark_text = match WatermarkUtils::bits_to_string(&extracted_bits) {
             Ok(text) => text,
-            Err(_) => {
-                WatermarkUtils::bits_to_string_lossy(&extracted_bits)
-            }
+            Err(_) => WatermarkUtils::bits_to_string_lossy(&extracted_bits),
         };
 
         // 清理临时文件
