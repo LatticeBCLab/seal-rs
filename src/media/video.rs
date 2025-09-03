@@ -251,6 +251,11 @@ impl VideoWatermarker {
         watermark_length: usize,
         sample_frames: usize,
     ) -> Result<Vec<(Vec<u8>, f64)>> {
+        if sample_frames == 0 {
+            // 提取所有帧
+            return Self::extract_all_frames_watermark(input_path, temp_dir, algorithm, watermark_length);
+        }
+
         let mut results = Vec::new();
         use crate::media::ImageWatermarker;
 
@@ -324,6 +329,87 @@ impl VideoWatermarker {
                 "所有采样帧的水印提取都失败".to_string(),
             ));
         }
+
+        Ok(results)
+    }
+
+    /// # Extract all frames watermark
+    fn extract_all_frames_watermark<P: AsRef<Path>>(
+        input_path: P,
+        temp_dir: &Path,
+        algorithm: &dyn WatermarkAlgorithm,
+        watermark_length: usize,
+    ) -> Result<Vec<(Vec<u8>, f64)>> {
+        let mut results = Vec::new();
+        use crate::media::ImageWatermarker;
+
+        let frames_dir = temp_dir.join("all_frames");
+        std::fs::create_dir_all(&frames_dir)?;
+
+        // Extract all frames
+        Self::extract_frames(input_path.as_ref(), &frames_dir)?;
+
+        // Get all frame files
+        let frame_files = Self::get_frame_files(&frames_dir)?;
+
+        if frame_files.is_empty() {
+            return Err(WatermarkError::ProcessingError(
+                "未能提取任何视频帧".to_string(),
+            ));
+        }
+
+        // Process each frame
+        for (i, frame_file) in frame_files.iter().enumerate() {
+            // Ensure frame file exists and is not empty
+            if !frame_file.exists() {
+                continue;
+            }
+            if let Ok(meta) = frame_file.metadata() {
+                if meta.len() == 0 {
+                    let _ = std::fs::remove_file(frame_file);
+                    continue;
+                }
+            }
+
+            // Calculate frame quality
+            let quality = match Self::assess_frame_quality(frame_file) {
+                Ok(q) => q,
+                Err(_) => {
+                    // Quality assessment failed, skip this frame
+                    continue;
+                }
+            };
+
+            // Extract watermark
+            match ImageWatermarker::extract_watermark(
+                frame_file,
+                algorithm,
+                watermark_length,
+            ) {
+                Ok(watermark_text) => {
+                    // Convert string to bit array for voting
+                    let bits = Self::string_to_bits(&watermark_text, watermark_length);
+                    results.push((bits, quality));
+                }
+                Err(_) => {
+                    // Extraction failed, skip this frame
+                    continue;
+                }
+            }
+
+            // Print progress every 100 frames to avoid too much output
+            if (i + 1) % 100 == 0 {
+                eprintln!("🎬 已处理 {} 帧", i + 1);
+            }
+        }
+
+        if results.is_empty() {
+            return Err(WatermarkError::ProcessingError(
+                "所有帧的水印提取都失败".to_string(),
+            ));
+        }
+
+        eprintln!("🎬 总共处理了 {} 帧，成功提取水印的帧数: {}", frame_files.len(), results.len());
 
         Ok(results)
     }
@@ -1031,7 +1117,8 @@ impl VideoWatermarker {
         confidence_threshold: Option<f64>,
     ) -> Result<(String, f64, usize)> {
         let input_path = input_path.as_ref();
-        let sample_frames = sample_frames.unwrap_or(7);
+        // 当 sample_frames=0 时表示提取所有帧，保持原值；否则使用默认值7
+        let sample_frames = sample_frames.unwrap_or(0);
         let confidence_threshold = confidence_threshold.unwrap_or(0.6);
 
         // 创建提取进度条
@@ -1057,7 +1144,12 @@ impl VideoWatermarker {
         progress.inc(1);
 
         // 多帧采样提取
-        progress.set_message(format!("🎬  提取{}个样本帧", sample_frames));
+        let extract_message = if sample_frames == 0 {
+            "🎬  提取所有帧".to_string()
+        } else {
+            format!("🎬  提取{}个样本帧", sample_frames)
+        };
+        progress.set_message(extract_message);
         let frame_results = Self::extract_multiple_frames_watermark(
             input_path,
             &temp_dir,
@@ -1165,7 +1257,8 @@ impl VideoWatermarker {
         video_info: &VideoInfo,
     ) -> Result<(String, f64, usize)> {
         let input_path = input_path.as_ref();
-        let sample_frames = sample_frames.unwrap_or(7);
+        // 当 sample_frames=0 时表示提取所有帧，保持原值；否则使用默认值7
+        let sample_frames = sample_frames.unwrap_or(0);
         let confidence_threshold = confidence_threshold.unwrap_or(0.6);
 
         // 创建提取进度条
@@ -1203,7 +1296,12 @@ impl VideoWatermarker {
         progress.inc(1);
 
         // 从视频帧提取水印
-        progress.set_message(format!("🎬  提取{}个样本帧", sample_frames));
+        let extract_message = if sample_frames == 0 {
+            "🎬  提取所有帧".to_string()
+        } else {
+            format!("🎬  提取{}个样本帧", sample_frames)
+        };
+        progress.set_message(extract_message);
         let frame_results = Self::extract_multiple_frames_watermark(
             input_path,
             &temp_dir,

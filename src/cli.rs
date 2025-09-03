@@ -63,8 +63,8 @@ pub enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
 
-        /// 视频采样帧数（仅对视频有效，默认7帧）
-        #[arg(long, default_value = "7")]
+        /// 视频采样帧数（仅对视频有效，默认0帧）
+        #[arg(long, default_value = "0")]
         sample_frames: usize,
 
         /// 置信度阈值（仅对视频有效，0.0-1.0，默认0.6）
