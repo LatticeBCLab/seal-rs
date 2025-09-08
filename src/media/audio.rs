@@ -243,11 +243,8 @@ impl AudioWatermarker {
         // 使用相同的音频专用DCT提取
         let extracted_bits = Self::ultra_gentle_extract(&samples, algorithm, watermark_length * 8)?;
 
-        // 添加容错机制，参考图片处理的做法
-        let watermark_text = match WatermarkUtils::bits_to_string(&extracted_bits) {
-            Ok(text) => text,
-            Err(_) => WatermarkUtils::bits_to_string_lossy(&extracted_bits),
-        };
+        // 直接转换比特数组为字符串
+        let watermark_text = WatermarkUtils::bits_to_string(&extracted_bits)?;
 
         // 清理临时文件
         let _ = std::fs::remove_dir_all(&temp_dir); // 使用 let _ 避免清理失败影响结果
